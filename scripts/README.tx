@@ -1,0 +1,12 @@
+(scvi-env) [lchen@localhost python]$ pwd
+/stomics_data/liminData/Visium/stmut_python/stmut-hires/python 
+export PYTHONPATH=$PYTHONPATH:$(pwd)
+python ../scripts/job_infercnv_bycluster.py
+
+
+steps:
+sample_group_gene_parallel.sh
+cnvkit.py
+job_weighted_median.py
+job_infercnv.py #Provide arms+gainloss as csv file
+

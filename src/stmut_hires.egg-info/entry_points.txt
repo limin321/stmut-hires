@@ -1,0 +1,2 @@
+[console_scripts]
+stmut-hires = stmut_hires.main:main

@@ -3,6 +3,7 @@ import glob
 import logging
 import pandas as pd
 from abc import ABC, abstractmethod
+from importlib import resources
 
 """ 
 Use `super` to call the parent class
@@ -23,12 +24,14 @@ class BaseConfig(ABC):
         self.cores = cores # for weighted-median parallel
         self.logger = logging.getLogger(self.__class__.__name__)
 
-        # Get the path to the directory where config.py is located and Go up two levels to reach /stmut-hires/
-        current_dir = os.path.dirname(os.path.abspath(__file__))
-        project_root = os.path.dirname(os.path.dirname(current_dir))
-        # Set the attribute
-        self.gene_info = os.path.join(project_root, "data", "ensembl-gene-info.hg38.tsv")
-        self.corr_file = os.path.join(project_root, "data", "tcga-skcm.cnv-expr-corr.tsv")
+        # Get the path to the data resource
+        data_pkg = "stmut_hires.data"
+        # Use .files() to get a traversable path (Python 3.9+)
+        data_path = resources.files(data_pkg)
+        self.gene_info = str(data_path.joinpath("ensembl-gene-info.hg38.tsv"))
+        self.corr_file = str(data_path.joinpath("tcga-skcm.cnv-expr-corr.tsv"))
+        default_bed = str(data_path.joinpath("reference").joinpath("hg38_centromereSimple.bed"))
+        self.bed_file = default_bed
 
     
     @abstractmethod
@@ -50,7 +53,7 @@ class BaseConfig(ABC):
 
 class InitialStepConfig(BaseConfig):
     """COnfiguration specific to the initial data processing step (step1)."""
-    def __init__(self, clusterf, exp_h5, **kwargs):
+    def __init__(self, clusterf=None, exp_h5=None, **kwargs):
         super().__init__(**kwargs)
         self.clusterf = clusterf
         self.exp_h5 = exp_h5
@@ -60,10 +63,14 @@ class InitialStepConfig(BaseConfig):
     def validate_inputs(self):
         """Validate inputs for the first step."""
         self.logger.info("Validating step 1 input files...")
-        if not os.path.exists(self.clusterf):
-            raise FileNotFoundError(f"Cluster file NOT FOUND: {self.clusterf}")
-        if not os.path.exists(self.exp_h5):
-            raise FileNotFoundError(f"H5 file NOT FOUND: {self.exp_h5}")
+        if self.clusterf is not None:
+            if not os.path.exists(self.clusterf):
+                raise FileNotFoundError(f"Cluster file NOT FOUND: {self.clusterf}")
+        
+        if self.exp_h5 is not None:
+            if not os.path.exists(self.exp_h5):
+                raise FileNotFoundError(f"H5 file NOT FOUND: {self.exp_h5}")
+        
         self.ensure_output_dir()
         self.logger.info("Step 1 inputs are valid.")
 
@@ -100,31 +107,33 @@ class MergerConfig(InitialStepConfig):
         super().validate_inputs()
 
         #Then, validate inputs specific to the merge step
-        self.logger.info("Validating specific inputs...")
-        for f in [self.exp_h5, self.clusterf, self.spatial_file]:
-            if not os.path.exists(f):
-                raise FileNotFoundError(f"Input file missing: {f}")
+        self.logger.info("Validating Step 2 specific inputs...")
+        if self.spatial_file is not None:
+            if not os.path.exists(self.spatial_file):
+                raise FileNotFoundError(f"Spatial input file not found: {self.spatial_file}")
         
         # We need the expression and ensembl files generated from the first step to exist
-        if not self.expression_file:
-             raise FileNotFoundError(f"Expression file pattern is None: {self.expression_file}")
+        # We can check if clusterf was provided as a proxy for "is this a full run?"
+        if self.clusterf is not None:
+            if not self.expression_file:
+                raise FileNotFoundError(f"Expression file pattern is None: {self.expression_file}")
         
-        files_found = glob.glob(self.expression_file)
-        if not files_found:
-             raise FileNotFoundError(f"No expression files found matching pattern: {self.expression_file}")
+            files_found = glob.glob(self.expression_file)
+            if not files_found:
+                raise FileNotFoundError(f"No expression files found matching pattern: {self.expression_file}")
              
-        if not self.ensembl_file or not os.path.exists(self.ensembl_file):
-             raise FileNotFoundError(f"Ensembl file missing or not found after Step 1: {self.ensembl_file}")
-        if self.spatial_file and not os.path.exists(self.spatial_file):
-            raise FileNotFoundError(f"Spatial input file not found: {self.spatial_file}")
-        
-        # Validate general type constrains
-        if not isinstance(self.cutoff, int):
-            raise TypeError(f"cutoff must be an integer, but received: {type(self.cutoff)}")
-        if not isinstance(self.window, int):
-            raise TypeError(f"window must be an integer, but received: {type(self.window)}")
+            if not self.ensembl_file or not os.path.exists(self.ensembl_file):
+                raise FileNotFoundError(f"Ensembl file missing or not found after Step 1: {self.ensembl_file}")
+            if self.spatial_file and not os.path.exists(self.spatial_file):
+                raise FileNotFoundError(f"Spatial input file not found: {self.spatial_file}")
+            
+            # Validate general type constrains
+            if not isinstance(self.cutoff, int):
+                raise TypeError(f"cutoff must be an integer, but received: {type(self.cutoff)}")
+            if not isinstance(self.window, int):
+                raise TypeError(f"window must be an integer, but received: {type(self.window)}")
 
-        self.logger.info("Step 2 merging barcodes inputs are valid.")
+            self.logger.info("Step 2 merging barcodes inputs are valid.")
 
 class CNVAnalysisConfig(MergerConfig):
     """Configuration for call_cnv and visualization modules."""
@@ -138,13 +147,19 @@ class CNVAnalysisConfig(MergerConfig):
         self.ncluster = ncluster
         self.distance_metric = distance_metric
         self.linkage_method = linkage_method
-        self.bed_file = None
 
 
     def validate_inputs(self):
-        super().validate_inputs()
 
-        # Validate Optional: Annotation File
+        # We only call super().validate_inputs() if we are doing a full 'run'
+        # If clusterf is None, we are likely in 'call-cnv' mode
+        if self.clusterf is not None:
+            super().validate_inputs()
+        else:
+            self.ensure_output_dir()
+            self.logger.info("Skipping Step 1-5 validation for call-cnv mode.")
+
+        # Step 6 Validate: Annotation File
         if self.annotate_csv:
             if os.path.exists(self.annotate_csv):
                 self.logger.info(f"Annotation file provided: {self.annotate_csv}")
@@ -162,3 +177,8 @@ class CNVAnalysisConfig(MergerConfig):
         else:
             self.logger.info("No bulk CNV and annotation file provided; proceeding with standard workflow without bulkCNV info.")
 
+        # Add check: Do Step 5 outputs exist?
+        # Step 6 requires files in the output_dir created by previous runs
+        wtcnr_dir = os.path.join(self.output_dir, "wtcnr") # adjust name to match your code
+        if not os.path.exists(wtcnr_dir):
+            self.logger.warning(f"Weighted CNR directory {wtcnr_dir} not found. Step 6 may fail.")

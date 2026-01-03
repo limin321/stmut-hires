@@ -7,7 +7,7 @@ class SortedChrom:
     def gene_count_per_chr(cdt_meta):
         """Prepare chromosome data for left-side-bar plot"""
         meta = cdt_meta.copy()
-        meta[['chr', 'loc', 'gene']] = meta['NAME'].str.split(':', expand=True)
+        meta[['chr', 'loc', 'gene']] = meta['NAME'].str.split(':', n=2, expand=True)
         meta = meta['chr'].value_counts().reset_index(name = 'count')
         meta['chr'] = pd.to_numeric(meta['chr'], errors='coerce')
         chr_meta = meta.sort_values(by='chr', ascending=True)

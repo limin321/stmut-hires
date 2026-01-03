@@ -14,6 +14,7 @@ class ArmWeightedMedian:
         # Sometimes, the cnr file has contigs, but centromere-bed only has standard chr info, so to only keep standard chr info in cnr
         # Defined standard human chromosomes 1-22 and X (as 23)
         chrs_standard = [str(i) for i in range(1, 23)] + ['23']
+        self.cnr['chromosome'] = self.cnr['chromosome'].astype(str)
         chrs = self.cnr['chromosome'].unique()
         chrs_list = [c for c in chrs if c in chrs_standard]
 

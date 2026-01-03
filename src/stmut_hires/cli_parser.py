@@ -5,25 +5,49 @@ class CommandLineParser:
 
     @staticmethod
     def parse_args():
-        parser = argparse.ArgumentParser(description="Grouping barcodes within each cluster.")
-        parser.add_argument("--exp_h5", required=True, help="Gene expression matrix (h5)")
-        parser.add_argument("--cluster_file", required=True, help="Barcodes cluster info.(csv);Graph-based.csv downloaded from Loupe Browser.")
-        parser.add_argument("--spatial_file", required=True, help="Barcodes spatial coordinates.(./spatial/tissue_positions.parquet)")
-        parser.add_argument("--annotate_file", required=False, default=None, type=str, help="Two-column clusters annotated csv file.")
-        parser.add_argument("--bulkCNV_file", required=False, default=None, type=str, help="Two-column csv storing bulk-CNV info.")
-        parser.add_argument("--output_dir", required=True, help="Output directory.")
-        parser.add_argument("--num_processes", required=False, default=None,type=int, 
+        parser = argparse.ArgumentParser(description="CNV Analysis Pipeline.")
+        subparsers = parser.add_subparsers(dest="command", help="Available commands")
+
+        # 1. Global Parent: Required for All commands (Step 1-6)
+        global_parent = argparse.ArgumentParser(add_help=False)
+        global_parent.add_argument("--output_dir", required=True, help="Output directory.")
+        global_parent.add_argument("--cluster_file", required=True, help="Barcodes cluster info.(csv);Graph-based.csv downloaded from Loupe Browser.")
+        global_parent.add_argument("--dry_run", action="store_true", help="Dry run mode")    
+        
+        # 2. Step 1-5 Parent: Required only for Full pipeline
+        step1_5_parent = argparse.ArgumentParser(add_help=False)
+        step1_5_parent.add_argument("--exp_h5", required=True, help="Gene expression matrix (h5)")
+        step1_5_parent.add_argument("--spatial_file", required=True, help="Barcodes spatial coordinates.(./spatial/tissue_positions.parquet)")
+        step1_5_parent.add_argument("--num_processes", required=False, default=None,type=int, 
                             help="The number of processes used for parallel (default: %(default)s)")
-        parser.add_argument("--cutoff", required=False, default=1000,type=int, 
+        step1_5_parent.add_argument("--cutoff", required=False, default=1000,type=int, 
                             help="The min number of genes in a new spot as grouping cutoff. (default: %(default)s)")
-        parser.add_argument("--window", required=False, default=100,type=int, 
+        step1_5_parent.add_argument("--window", required=False, default=100,type=int, 
                             help="The nearest-neighbor spots for selecting grouping candidates. (default): %(default)s")
-        parser.add_argument("--cores", default=4, type=int, help="Number of cores to run weighted-median parallelly")
-        parser.add_argument("--pmtimes", default=5, type=int, help="The number of permutation times.")
-        parser.add_argument("--ncluster", default=6, type=int, help="Number of clusters for CNV plot.")
-        parser.add_argument("--distance_metric", type=str, help="Distance metric for clustering")
-        parser.add_argument("--linkage_method", type=str, help="Linkage method for hierarchical clustering")
-        parser.add_argument("--dry_run", action="store_true", help="Dry run mode")    
+        step1_5_parent.add_argument("--cores", default=4, type=int, help="Number of cores to run weighted-median parallelly")
+        
+        # 3. Step 6 Parent: Required for both 'run' and 'call-cnv'
+        step6_parent = argparse.ArgumentParser(add_help=False)
+        step6_parent.add_argument("--annotate_file", required=False, default=None, type=str, help="Two-column clusters annotated csv file.")
+        step6_parent.add_argument("--bulkCNV_file", required=False, default=None, type=str, help="[Optional] Two-column csv storing bulk-CNV info.")
+        step6_parent.add_argument("--pmtimes", default=5, type=int, help="The number of permutation times.")
+        step6_parent.add_argument("--ncluster", default=6, type=int, help="Number of clusters for CNV plot.")
+        step6_parent.add_argument("--distance_metric", type=str, help="Distance metric for clustering")
+        step6_parent.add_argument("--linkage_method", type=str, help="Linkage method for hierarchical clustering")
+        
+        # Sub-command: run (Full pipeline)
+        subparsers.add_parser(
+            "run", 
+            parents=[global_parent,step1_5_parent,step6_parent], 
+            help="Run full pipeline."
+        )
+        
+        # Sub-command: call-cnv (Step 6)
+        subparsers.add_parser(
+            "call-cnv", 
+            parents=[global_parent,step6_parent], 
+            help="Run Step 6: calling CNV..only")
+        
         return parser.parse_args()
 
 

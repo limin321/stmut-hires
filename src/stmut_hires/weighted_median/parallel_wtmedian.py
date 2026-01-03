@@ -1,7 +1,7 @@
 import os
 import multiprocessing as mp
 import logging 
-
+from importlib import resources
 
 # Assuming these imports are correct
 from .cnr_reader import CnrReader
@@ -19,10 +19,12 @@ class WorkflowOrchestrator:
         self.cnr_files = self._find_cnr_files()
         self.logger = logging.getLogger(__name__)
 
-        # Determine project root
-        module_dir = os.path.dirname(os.path.abspath(__file__))  # adjust if using Jupyter
-        project_root = os.path.abspath(os.path.join(module_dir, "../../.."))
-        self.bed_file = config.bed_file or os.path.join(project_root, "data/reference/hg38_centromereSimple.bed")
+        # # Determine project root
+        # module_dir = os.path.dirname(os.path.abspath(__file__))  # adjust if using Jupyter
+        # project_root = os.path.abspath(os.path.join(module_dir, "../../.."))
+        # self.bed_file = config.bed_file or os.path.join(project_root, "data/reference/hg38_centromereSimple.bed")
+        self.bed_file = config.bed_file
+
         # check if bed_file exist
         if not os.path.exists(self.bed_file):
             error_msg = f"Required BED file not found: {self.bed_file}"

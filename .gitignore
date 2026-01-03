@@ -2,3 +2,6 @@ __pycache__/
 *.py[cod]
 scripts/for_delete/
 scripts/
+build/
+*.egg-info/
+__pycache__/

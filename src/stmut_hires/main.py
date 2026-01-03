@@ -58,148 +58,182 @@ def main():
     # Setup logging
     logger = setup_logging()
 
+    args_dict = vars(args)
+
     try:
-        #config = MergerConfig(
+        # Use vars(args).get() to safely handle arguments that might be missing
+        # depending on which subcommand (run vs call-cnv) was used.
         config = CNVAnalysisConfig(
-            clusterf=args.cluster_file,
-            exp_h5=args.exp_h5,
-            output_dir=args.output_dir,
-            dry_run=args.dry_run,
-            spatial_file=args.spatial_file,
-            cutoff=args.cutoff,
-            window=args.window,
-            num_processes=args.num_processes,
-            cores=args.cores,
-            annotate_csv=args.annotate_file,
-            bulk_csv=args.bulkCNV_file,
-            ncluster = args.ncluster,
-            pmtimes = args.pmtimes,
-            distance_metric = args.distance_metric,
-            linkage_method = args.linkage_method,
+            clusterf=args_dict.get('cluster_file'),
+            exp_h5=args_dict.get('exp_h5'),
+            spatial_file=args_dict.get('spatial_file'),
+            num_processes=args_dict.get('num_processes'),
+            cutoff=args_dict.get('cutoff', 1000),
+            window=args_dict.get('window', 100),
+
+            output_dir=args_dict.get('output_dir'),
+            dry_run=args_dict.get('dry_run'),
+            cores=args_dict.get('cores', 4),
+
+            annotate_csv=args_dict.get('annotate_file'),
+            bulk_csv=args_dict.get('bulkCNV_file'),
+            ncluster=args_dict.get('ncluster', 6),
+            pmtimes=args_dict.get('pmtimes', 5),
+            distance_metric=args_dict.get('distance_metric', 'euclidean'),
+            linkage_method=args_dict.get('linkage_method', 'ward'),
         )
     except (FileNotFoundError, TypeError, NotADirectoryError) as e:
         logger.error(f"Configuration Error: {e}")
         sys.exit(1)
 
+    if args.command == "run":
+        logger.info("Running full pipeline ...")
 
-    # Define the directory where intermediate cluster parquet files are stored.
-    intermediate_cluster_dir = os.path.join(config.output_dir, "cluster_exp")
-    expression_file_pattern = os.path.join(intermediate_cluster_dir, "Cluster*.parquet")
-    ensembl_path = os.path.join(intermediate_cluster_dir, "ensembl.csv")
 
-    files_exist = glob.glob(expression_file_pattern)  
+        # Define the directory where intermediate cluster parquet files are stored.
+        intermediate_cluster_dir = os.path.join(config.output_dir, "cluster_exp")
+        expression_file_pattern = os.path.join(intermediate_cluster_dir, "Cluster*.parquet")
+        ensembl_path = os.path.join(intermediate_cluster_dir, "ensembl.csv")
 
-    # Set the config paths right away to where the files *should* be
-    config.set_step1_outputs(
-        expression_file_path = expression_file_pattern,
-        ensembl_file_path = ensembl_path
-    )
+        files_exist = glob.glob(expression_file_pattern)  
 
-    if files_exist:
-        logger.info(f"Intermediate cluster files found in '{intermediate_cluster_dir}'.")
+        # Set the config paths right away to where the files *should* be
+        config.set_step1_outputs(
+            expression_file_path = expression_file_pattern,
+            ensembl_file_path = ensembl_path
+        )
 
+        if files_exist:
+            logger.info(f"Intermediate cluster files found in '{intermediate_cluster_dir}'.")
+
+            try:
+                verify_parquet_files(expression_file_pattern, logger)
+
+            except IOError as e:
+                # This handles both "No files found" and "Corrupted files detected" errors
+                logger.error(e)
+                logger.info("Corrupt files detected. Forcing re-run of Step 1 processing.")
+                # Optional: Clean up existing broken files before the re-run starts
+                for f in glob.glob(expression_file_pattern) + [ensembl_path]:
+                    if os.path.exists(f):
+                        os.remove(f)
+                        logger.info(f"Deleted broken file: {f}")
+
+                files_exist = False
+
+        if not files_exist:
+            logger.info("Starting step 1 processing...")
+            processor = ClusterExpressionProcessor(config, dry_run=args.dry_run)
+            processor.process()
+
+        # The crucial change: The validation should happen *here*, 
+        # after we are certain that either existing files passed verification, or new files have just been created by processor.process().
+        # Then call the config obj defined above, it inherites other classes in the config.py file.
+        config.validate_inputs()
+
+        if args.dry_run:
+            logger.info("Starting dry-run mode - no files will be written")
+        else:
+            logger.info("Starting normal processing mode")
+        
+        logger.info("Starting Step 2 (ParallelClusterProcessor/Merger)...")
+        # Create output folders
+        output_creator = OutputDirManager(config.output_dir)
+        txt_output_dir, cnr_dir, wtcnr_dir, cdt_dir = output_creator.create_output_dir()
+
+        summary_exist = glob.glob(os.path.join(config.output_dir, "cluster_summary","*barcode_grouping_info.csv"))
+        if len(summary_exist) == len(files_exist):
+            logger.info("Step 2 (ParallelClusterProcessor/Merger) is done.")
+
+        if not summary_exist:
+            # Process clusters in parallel
+            parallel_processor = ParallelClusterProcessor(config=config)
+            parallel_processor.parallel_cluster_merger()
+            output_creator.move_csvs_to_summary() # move merger summary to cluster_summary dir
+
+        logger.info("Starting Step 3: Generate cnr file for each barcode ...")
+        cnr_exist = glob.glob(os.path.join(cnr_dir, "*.cnr"))
+        if cnr_exist:
+            logger.info("cnr files are generated.")
+            logger.warning(f"If you want to regenerate cnr files, make sure {cnr_dir} is empty.")
+        
+        if not cnr_exist:
+            patch_code = (
+                "import pandas as pd; "
+                "pd.DataFrame.iteritems = pd.DataFrame.items; "
+                "pd.Series.iteritems = pd.Series.items; "
+                "import sys; "
+                "from cnvlib.cnvkit import main; "
+                "sys.exit(main())"
+            )
+
+            txt_files = glob.glob(os.path.join(txt_output_dir, "*.txt"))
+            logger.info(f"Running import-rna on {len(txt_files)} files...")
+            full_cmd = (
+                f"ulimit -s 65536 && cd {txt_output_dir} && "
+                f'python -c "{patch_code}" import-rna '
+                f"-f counts -g {config.gene_info} -c {config.corr_file} "
+                f"--output-dir {cnr_dir} " 
+                f"-o {cnr_dir}/output.txt "
+                f"$(ls *.txt)"  # Command substitution to pass all files at once
+            )
+            subprocess.run(full_cmd, shell=True, check=True)
+
+
+        logger.info("Starting step 4: weighted_median calculation...")
+        wtcnr_exist = glob.glob(os.path.join(wtcnr_dir, "*.cnr"))
+
+        if wtcnr_exist:
+            logger.info("weighted cnr files are generated.")
+            logger.warning(f"If you want to regenerate weighted cnr files, make sure {wtcnr_dir} is empty.")
+        else:
+            #orchestrator = WorkflowOrchestrator(output_dir, cores)
+            orchestrator = WorkflowOrchestrator(config=config)
+            orchestrator.run_parallel_workflow()
+
+        logger.info("Starting step 5: export cdt file...")
+        cnr_files_list = glob.glob(os.path.join(wtcnr_dir, "*.cnr"))
+
+        export_shell_cmd = (
+            f"ulimit -s 65536 && "
+            f"cd {wtcnr_dir} && "
+            f"cnvkit.py export cdt *.cnr -o {cdt_dir}/grpWt.cdt"
+        )
+
+        logger.info(f"Exporting CDT for {len(cnr_files_list)} files...")
         try:
-            verify_parquet_files(expression_file_pattern, logger)
-
-        except IOError as e:
-            # This handles both "No files found" and "Corrupted files detected" errors
-            logger.error(e)
-            logger.info("Corrupt files detected. Forcing re-run of Step 1 processing.")
-            # Optional: Clean up existing broken files before the re-run starts
-            for f in glob.glob(expression_file_pattern) + [ensembl_path]:
-                 if os.path.exists(f):
-                     os.remove(f)
-                     logger.info(f"Deleted broken file: {f}")
-
-            files_exist = False
-
-    if not files_exist:
-        logger.info("Starting step 1 processing...")
-        processor = ClusterExpressionProcessor(config, dry_run=args.dry_run)
-        processor.process()
-
-    # The crucial change: The validation should happen *here*, 
-    # after we are certain that either existing files passed verification, or new files have just been created by processor.process().
-    # Then call the config obj defined above, it inherites other classes in the config.py file.
-    config.validate_inputs()
-
-    if args.dry_run:
-        logger.info("Starting dry-run mode - no files will be written")
-    else:
-        logger.info("Starting normal processing mode")
-    
-    logger.info("Starting Step 2 (ParallelClusterProcessor/Merger)...")
-    # Process clusters in parallel
-    parallel_processor = ParallelClusterProcessor(config=config)
-    parallel_processor.parallel_cluster_merger()
-
-    logger.info("Starting Step 3: Generate cnr file for each barcode ...")
-    # Create output folders
-    output_creator = OutputDirManager(config.output_dir)
-    txt_output_dir, cnr_dir, wtcnr_dir, cdt_dir = output_creator.create_output_dir()
-    output_creator.move_csvs_to_summary()
-
-    patch_code = (
-        "import pandas as pd; "
-        "pd.DataFrame.iteritems = pd.DataFrame.items; "
-        "pd.Series.iteritems = pd.Series.items; "
-        "import sys; "
-        "from cnvlib.cnvkit import main; "
-        "sys.exit(main())"
-    )
-
-    txt_files = glob.glob(os.path.join(txt_output_dir, "*.txt"))
-    logger.info(f"Running import-rna on {len(txt_files)} files...")
-    full_cmd = (
-        f"ulimit -s 65536 && cd {txt_output_dir} && "
-        f'python -c "{patch_code}" import-rna '
-        f"-f counts -g {config.gene_info} -c {config.corr_file} "
-        f"--output-dir {cnr_dir} " 
-        f"-o {cnr_dir}/output.txt "
-        f"$(ls *.txt)"  # Command substitution to pass all files at once
-    )
-    subprocess.run(full_cmd, shell=True, check=True)
+            subprocess.run(export_shell_cmd, shell=True, check=True)
+            print("Export successful.")
+        except subprocess.CalledProcessError as e:
+            print(f"Error during export: {e}")
 
 
-    logger.info("Starting step 4: weighted_median calculation...")
-    #orchestrator = WorkflowOrchestrator(output_dir, cores)
-    orchestrator = WorkflowOrchestrator(config=config)
-    orchestrator.run_parallel_workflow()
+        logger.info("Starting step 6: calling CNV...")
+        # Instantiate workflow
+        #workflow = CNVCallPlotWorkflow(graph_based_csv, annotate_csv, output_dir)
+        workflow = CNVCallPlotWorkflow(config=config)
+        workflow.cnv_workflow(
+            ncluster=config.ncluster,
+            bulk_csv=config.bulk_csv,
+            pmtimes=config.pmtimes
+        )
 
-    logger.info("Starting step 5: export cdt file...")
-    cnr_files_list = glob.glob(os.path.join(wtcnr_dir, "*.cnr"))
+    elif args.command == "call-cnv":
+        logger.info("Re-running Step 6: calling CNV ...")
+        workflow = CNVCallPlotWorkflow(config=config)
+        workflow.cnv_workflow(
+            ncluster=config.ncluster,
+            bulk_csv=config.bulk_csv,
+            pmtimes=config.pmtimes
+        ) 
 
-    export_shell_cmd = (
-        f"ulimit -s 65536 && "
-        f"cd {wtcnr_dir} && "
-        f"cnvkit.py export cdt *.cnr -o {cdt_dir}/grpWt.cdt"
-    )
-
-    logger.info(f"Exporting CDT for {len(cnr_files_list)} files...")
-    try:
-        subprocess.run(export_shell_cmd, shell=True, check=True)
-        print("Export successful.")
-    except subprocess.CalledProcessError as e:
-        print(f"Error during export: {e}")
-
-
-    logger.info("Starting step 6: calling CNV...")
-    # Instantiate workflow
-    #workflow = CNVCallPlotWorkflow(graph_based_csv, annotate_csv, output_dir)
-    workflow = CNVCallPlotWorkflow(config=config)
-    workflow.cnv_workflow(
-        ncluster=config.ncluster,
-        bulk_csv=config.bulk_csv,
-        pmtimes=config.pmtimes
-    )
-    
 if __name__ == "__main__":
     main()
 
 
 """ 
 indir="/stomics_data/liminData/Visium/stmut_python/BD17_bin8_inputs"
-outdir="/stomics_data/liminData/Visium/stmut_python/outs"
+outdir="/stomics_data/liminData/Visium/stmut_python/outs1"
 
 # step1&2
 python ./src/stmut_hires/main.py \
@@ -220,6 +254,15 @@ git clone https://github.com/etal/cnvkit
 cd cnvkit/
 pip install -e .
 cnvkit.py import-rna --help
+
+# to add sub_command, modify config, cli_parser, main three files.
+python ../src/stmut_hires/main.py call-cnv \
+    --cluster_file ${indir}/Graph-Based.csv \
+    --output_dir ${outdir} \
+    --annotate_file ${indir}/annotate.csv \
+    --bulkCNV_file ${indir}/bulkCNV.csv \
+    --pmtimes 5 \
+    --ncluster 6
 """
 
 

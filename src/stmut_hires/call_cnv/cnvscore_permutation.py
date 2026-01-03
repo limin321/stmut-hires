@@ -24,7 +24,7 @@ class CNVScore:
 
         # Extract chr, pos, gene from NAME column
         df1 = clusterSortedcnv[['NAME']].copy()
-        df1[['chr', 'pos', 'gene']] = df1['NAME'].str.split(':', expand=True)
+        df1[['chr', 'pos', 'gene']] = df1['NAME'].str.split(':', n=2, expand=True)
 
         # Split position into start and end
         df1[['start', 'end']] = df1['pos'].str.split('-', expand=True)

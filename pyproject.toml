@@ -26,6 +26,9 @@ dev = ["pytest", "black", "ruff"]
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+"stmut_hires.data" = ["**/*"]
+
 [project.scripts]
 stmut-hires = "stmut_hires.main:main"
 

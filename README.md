@@ -1,50 +1,63 @@
 # stmut-hires
 
 ## Description
-A command-line tool for CNV analysis in high-resolution spatial transcriptomicss. It is the upgraded version of [stmut](https://github.com/limin321/stmut) to handle high resolution spatial transcriptomics data (VisiumHD, StereoSeq)
+A command-line tool for CNV analysis in high-resolution spatial transcriptomics. It is the upgraded version of [stmut](https://github.com/limin321/stmut) to handle high resolution spatial transcriptomics data (VisiumHD, StereoSeq)
 
 ## Getting Started
+### Performance Benchmarks
+The following benchmarks were recorded using a high-resolution (~680k) barcodes VisiumHD dataset.
 
-⚠️ This project is under active development.  
-### Prerequisites
+|Metric              | Full Pipeline Run (run)                     |
+|--------------------|---------------------------------------------|
+|Dataset Type        |Visium HD                                    |
+|Dataset Size        |682,346 barcodes(Tissue-filtered)            |
+|Gene Count          |18,085 Genes                                 |
+|Wall Time(Duration) |15h 56m                                      |
+|Peak Memory(RAM)    |44.58 GB                                     |
+|Validated Hardware  |Intel(R) Xeon(R) Gold 5222 (16 Logical CPUs) |
+
+Memory Scaling: It took ~45GB for 682k spots. This suggests approximately 65–70 MB of RAM per 1,000 spots.  
+Recommendation: For a full-resolution 11-million bin dataset, users will need to utilize the binning features (8µm or 16µm) or request high-memory nodes (512GB+) to avoid OOM (Out of Memory) crashes.
+
+
+
+### 🖥️ Validated Testing Environment
+To ensure reproducibility, performance and stability have been validated on the following enterprise-grade configuration:
+- - Hardware Specifications
+* **CPU:** Intel(R) Xeon(R) Gold 5222 @ 3.80GHz (Dual-Socket)
+* **Architecture:** x86_64 (16 logical CPUs, 8 physical cores)
+* **Cache/Tech:** 16.5MB L3 Cache | VT-x Virtualization enabled
+* **Memory Management:** NUMA-aware (2 nodes) optimized for parallel processing
+- - Operating System & Software
+* **OS:** CentOS Linux 7 (Core)
+* **Kernel:** x86_64 Baseline
+* **Glibc Version:** 2.17 (Manylinux_2_17 compatible)
+
+#### Prerequisites
 * Python: 3.9+    
 * Key Dependencies: pandas(v2.3.2), cnvkit(v0.9.12), pomegranate(v0.14.8), biopython(v1.86), h5py(v3.15.1)  
-* Tested OS: "CentOS Linux 7 (Core)"   
-
-### Performance Benchmarks
--- add table - software, hardware
 
 ### Installation
+1.  Clone the repository and create the environment:
 ```
-# 1. First create a conda environment
-conda config --add channels conda-forge
-conda config --add channels bioconda
-conda config --add channels defaults
-conda config --set channel_priority strict
-conda create -n stmut-hires python=3.10 cnvkit pomegranate biopython h5py -c conda-forge -c bioconda
-
-# 2. Activate the new env:
-conda activate stmut-hires
-
-# 3.  Clone the stmut-hires to your hpc
 git clone https://github.com/limin321/stmut-hires.git
 cd stmut-hires
-pip install .
-
-# 4. Test install successfully ...
-stmut-hires --help
-usage: stmut-hires [-h] {run,call-cnv} ...
-
-CNV Analysis Pipeline.
-
-positional arguments:
-  {run,call-cnv}  Available commands
-    run           Run full pipeline.
-    call-cnv      Run Step 6: calling CNV..only
-
-options:
-  -h, --help      show this help message and exit
+conda env create -f environment.yml
+conda activate stmut-hires
 ```
+2. Fix Library Link (Required for HPC stability)
+```
+mkdir -p $CONDA_PREFIX/etc/conda/activate.d
+echo 'export LD_LIBRARY_PATH=$CONDA_PREFIX/lib:$LD_LIBRARY_PATH' > $CONDA_PREFIX/etc/conda/activate.d/env_vars.sh
+chmod +x $CONDA_PREFIX/etc/conda/activate.d/env_vars.sh
+```
+
+3. Verify installation:
+```
+conda activate stmut-hires
+stmut-hires --help
+```
+If successful, you will see the CNV Analysis Pipeline help message.
 
 ### Usage example:
 #### 1. Prepare inputs files
@@ -58,7 +71,7 @@ options:
 | annotate.csv                  | cluster tumor/normal annotation |
 | bulkCNV.csv  (Optional)       | bulk CNV info                   |
 
-annotate.csv -- A two-column tumor/normal annotation csv file.
+annotate.csv -- A two-column tumor/normal annotation csv file. (Case sensitive, 'cluster' NOT 'Cluster' or 'CLUSTER')
 ```
 cluster,annotate
 cluster 1,tumor
@@ -82,18 +95,19 @@ For other inputs, please refer to the `--help` message
 
 #### 2. Running full pipeline
 ```
-indir="xx/xx/inputs"
-outdir="xx/xx/outs"
+# Define paths
+INDIR="xx/xx/inputs"
+OUTDIR="xx/xx/outs"
 
 stmut-hires run \
-    --exp_h5 ${indir}/filtered_feature_bc_matrix.h5 \
-    --cluster_file ${indir}/Graph-Based.csv \
-    --spatial_file ${indir}/spatial/tissue_positions.parquet \
-    --output_dir ${outdir} \
+    --exp_h5 ${INDIR}/filtered_feature_bc_matrix.h5 \
+    --cluster_file ${INDIR}/Graph-Based.csv \
+    --spatial_file ${INDIR}/spatial/tissue_positions.parquet \
+    --output_dir ${OUTDIR} \
     --cutoff 3000 \
     --num_processes 10 \
-    --annotate_file ${indir}/annotate.csv \
-    --bulkCNV_file ${indir}/bulkCNV.csv \
+    --annotate_file ${INDIR}/annotate.csv \
+    --bulkCNV_file ${INDIR}/bulkCNV.csv \
     --cores 10 \
     --pmtimes 50 \
     --ncluster 6
@@ -103,18 +117,19 @@ stmut-hires run \
 #### 3. Rerun CNV calling step
 It is typically difficult to infer copy number alterations on the X-chr with gene expression data. One copy of the X-chr is silenced via X-inactivation. If the inactive copy of X is subjected to a CNA, it would not show up in the gene expression data. If the active copy is gained, better to include X-chr just to rerun the RankedBySimilarity analysis.
 
-Assue you have run the full pipeline, just need to modify your "bulkCNV.csv" file, and rerun the following script.
-Note, the outputs inside the `figures` and `tables` directory from full pipeline will overwritten. Please make your own copy if you want to keep the full pipeline outputs.
+Assuming you have run the full pipeline, just need to modify your "bulkCNV.csv" file, and rerun the following script.
+**Note**, the outputs inside the `figures` and `tables` directory from full pipeline will overwritten. Please make your own copy if you want to keep the full pipeline outputs.
 
 ```
-indir="xx/xx/inputs"
-outdir="xx/xx/outs"
+# Define paths
+INDIR="xx/xx/inputs"
+OUTDIR="xx/xx/outs"
 
 stmut-hires call-cnv \
-    --cluster_file ${indir}/Graph-Based.csv \
-    --output_dir ${outdir} \
-    --annotate_file ${indir}/annotate.csv \
-    --bulkCNV_file ${indir}/bulkCNV.csv \
+    --cluster_file ${INDIR}/Graph-Based.csv \
+    --output_dir ${OUTDIR} \
+    --annotate_file ${INDIR}/annotate.csv \
+    --bulkCNV_file ${INDIR}/bulkCNV.csv \
     --pmtimes 50 \
     --ncluster 6
 ```
@@ -155,12 +170,15 @@ options:
                         Linkage method for hierarchical clustering
 ```
 
-
 ### Authors
-Limin Chen
+Limin Chen  
 lynnchen31@gmail.com
 
+### License
+This project is licensed under the **MIT License**.  
+See the [LICENSE](https://github.com/limin321/stmut-hires/blob/master/LICENSE) file for the full license text.
 
-
+### Citation
+Chen, L., Chang, D., Tandukar, B. et al. STmut: a framework for visualizing somatic alterations in spatial transcriptomics data of cancer. Genome Biol 24, 273 (2023). https://doi.org/10.1186/s13059-023-03121-6
 
 

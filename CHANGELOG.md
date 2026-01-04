@@ -2,7 +2,19 @@
 
 All notable changes to stmut-hires will be documented in this file.
 
-## [Unreleased]
+## [2026-01-04]
+### Added
+- **Sub-command `call-cnv`**: Dedicated workflow to rerun CNV calling (Step 6), specifically optimized for X-chromosome gain/loss recovery.
+- **Grouping Analytics**: Automated generation of `grouped_spotSummary.csv` and histogram plots to visualize bin grouping statistics.
+- **HPC Stability Fix**: Integrated environment activation hooks to resolve `CXXABI_1.3.15` and `libstdc++.so.6` linking issues on enterprise Linux (CentOS 7).
+- **Comprehensive Logging**: Replaced standard output prints with a structured logging system for better debugging in headless HPC environments.
+- **Unit Testing**: Initial test suite for core functions and CLI entry points.
+
+### Changed
+- **Documentation**: Updated README with enterprise-grade hardware specifications and performance benchmarks.
+
+
+## [2025-12-15]
 
 ### Added
 - Multiprocessing support for parallel cluster processing

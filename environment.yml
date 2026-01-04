@@ -1,0 +1,15 @@
+name: stmut-hires
+channels:
+  - conda-forge
+  - bioconda
+  - defaults
+dependencies:
+  - python=3.10
+  - libstdcxx-ng >=13.0  # Specifically forces the correct C++ ABI versions
+  - h5py
+  - cnvkit
+  - pomegranate
+  - biopython
+  - pip
+  - pip:
+    - .

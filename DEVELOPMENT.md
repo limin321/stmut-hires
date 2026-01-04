@@ -2,15 +2,15 @@
 
 ## Current Work (Sep 2025)
 
-### In progress
+### Finished.
 - [ ] **Sub-command to rerun X-chr gainLoss**
-  - Statue: 30% complete
+  - Statue: 100% complete
   - Issue: it is typically difficult to infer copy number alterations on the X-chr with gene expression data. One copy of the X-chr is silenced via X-inactivation. If the inactive copy of X is subjected to a CNA, it would not show up in the gene expression data. If the active copy is gained, better to include X-chr just to rerun the RankedBySimilarity analysis.
   - Next: add a sub-command to only run step3  by taking X-chr gain or loss.
   - Files: 
 
 - [ ] **Plot grouping statistic as standard outpot**
-  - Status: 50% complete
+  - Status: 100% complete
   - Issue: Missing statistic of how many bins to form a new bin
   - Next: Generate a histogram to visualize grouping statistics; grouped_spotSummary.csv (.1 not -1 in barcode); output --caseCNV_summ.csv
   - Files
@@ -85,7 +85,7 @@
 - Cross-platform compatibility (Linux/Mac)
 
 ### Dependencies
-- Python 3.8+
+- Python 3.9+
 - pandas, numpy, scikit-learn
 - dask, pyarrow
 - h5py (for H5 support)

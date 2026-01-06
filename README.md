@@ -59,6 +59,44 @@ stmut-hires --help
 ```
 If successful, you will see the CNV Analysis Pipeline help message.
 
+#### Docker Deployment
+We also provided a Dockerfile. You can create your own docker image while inside `stmut-hires` directory.
+`docker build -t stmut-hires:v0.1.0 .`
+or pull the docker image from Docker Hub [stmut-hires](https://hub.docker.com/r/limin321/stmut-hires) by
+`docker pull limin321/stmut-hires:v0.1.0`
+
+Here is an example of running  stmut-hires using docker container:
+```
+#! /bin/bash
+set -e
+
+indir="xx/xxbin8_inputs"
+outdir="xx/xx/outs1"
+mkdir -p ${outdir}
+sudo chmod -R 777 ${outdir}
+
+docker run --rm \
+    -v ${indir}:/data/input \
+    -v ${outdir}:/data/outs \
+    stmut-hires:v0.1.0 run \
+    --exp_h5 /data/input/filtered_feature_bc_matrix.h5 \
+    --cluster_file /data/input/Graph-Based.csv \
+    --spatial_file /data/input/spatial/tissue_positions.parquet \
+    --output_dir /data/outs \
+    --cutoff 3000 \
+    --num_processes 10 \
+    --annotate_file /data/input/annotate.csv \
+    --bulkCNV_file /data/input/bulkCNV.csv \
+    --cores 10 \
+    --pmtimes 50 \
+    --ncluster 6
+
+
+echo "Finished"
+```
+
+
+
 ### Usage example:
 #### 1. Prepare inputs files
 
@@ -113,6 +151,54 @@ stmut-hires run \
     --ncluster 6
 
 ```
+
+#### Expected output structure
+A successful run will include all the following folders. There are too many files in txt, cnr, wtcnr folder, which are not shown here for better demonstration.
+```
+(base) [stmut_hires_test_proj]$ tree -L 2 outs
+outs
+├── cdt
+│   └── grpWt.cdt
+├── cluster_exp
+│   ├── Cluster1.parquet
+│   ├── Cluster2.parquet
+│   ├── Cluster3.parquet
+│   ├── Cluster4.parquet
+│   ├── Cluster5.parquet
+│   ├── Cluster6.parquet
+│   ├── Cluster7.parquet
+│   ├── Cluster8.parquet
+│   ├── Cluster9.parquet
+│   └── ensembl.csv
+├── cluster_summary
+│   ├── Cluster1_barcode_grouping_info.csv
+│   ├── Cluster2_barcode_grouping_info.csv
+│   ├── Cluster3_barcode_grouping_info.csv
+│   ├── Cluster4_barcode_grouping_info.csv
+│   ├── Cluster5_barcode_grouping_info.csv
+│   ├── Cluster6_barcode_grouping_info.csv
+│   ├── Cluster7_barcode_grouping_info.csv
+│   ├── Cluster8_barcode_grouping_info.csv
+│   └── Cluster9_barcode_grouping_info.csv
+├── cnr
+├── figures
+│   ├── barcodes_counts_histogram.pdf
+│   ├── CNVs_OrganizedByGEcluster_UMIcount.pdf
+│   ├── CNVs_RankedBySimilarityToDNA_CNVscoreHistogram.pdf
+│   ├── CNVs_RankedBySimilarityToDNA_QQplot.pdf
+│   └── unrooted_CNVs_clustered_heatmap_class_6clusters.pdf
+├── tables
+|   ├── caseCNVScore.parquet
+|   ├── cluster_barcodes_summary.csv
+|   ├── CNVs_OrganizedByGEcluster_UMIcount.cdt
+|   ├── CNVs_RankedBySimilarityToDNA.cdt.parquet
+|   ├── CNVs_RankedBySimilarityToDNA_CNVscoreHistogram.csv
+|   ├── CNVs_RankedbySimilaritytoDNA_Quintiles4Loupe.csv
+|   └── permut_CNVscores.parquet
+├── txt
+└── wtcnr
+```
+
 
 #### 3. Rerun CNV calling step
 It is typically difficult to infer copy number alterations on the X-chr with gene expression data. One copy of the X-chr is silenced via X-inactivation. If the inactive copy of X is subjected to a CNA, it would not show up in the gene expression data. If the active copy is gained, better to include X-chr just to rerun the RankedBySimilarity analysis.

@@ -1,0 +1,26 @@
+# Local Python artifacts
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Local build artifacts (from your 'build' folder)
+build/
+dist/
+*.egg-info/
+
+# Development & Documentation (not needed to run the tool)
+.git/
+.gitignore
+docs/
+DEVELOPMENT.md
+CHANGELOG.md
+
+# Legacy code
+legacy/
+
+# Logs and temporary files
+*.log
+.ipynb_checkpoints/
+
+

@@ -1,0 +1,81 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ "master" ]
+  pull_request:
+    branches: [ "master" ]
+  workflow_dispatch: # This adds a "Run workflow" button in the Actions tab
+
+jobs:
+  # Stage 1: Continuous Integration (Testing)
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+        run:
+            shell: bash -el {0} # Important: ensures conda is active in every step
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      #1 set up Conda/Micromamba using environment.yml
+      - name: Set up Micromamba
+        uses: mamba-org/setup-micromamba@v2
+        with:
+            environment-file: environment.yml
+            environment-name: stmut-hires
+            cache-environment: true
+
+      #2 Fix Libray Link
+      - name: Fix Library Link
+        run: |
+          mkdir -p $CONDA_PREFIX/etc/conda/activate.d
+          echo "export LD_LIBRARY_PATH=$CONDA_PREFIX/lib:\$LD_LIBRARY_PATH" > $CONDA_PREFIX/etc/conda/activate.d/env_vars.sh
+          chmod +x $CONDA_PREFIX/etc/conda/activate.d/env_vars.sh
+          # Source it immediately for the current shell
+          source $CONDA_PREFIX/etc/conda/activate.d/env_vars.sh
+    
+      #3 Install package and tools into the active Conda env.
+      - name: Install dependencies
+        run: |
+          pip install . 
+          pip install flake8
+          pip install ruff 
+
+      #4 Lint
+      - name: Lint with flake8 and Syntax with Ruff
+        run: |
+          # Fails if there are syntax errors or undefined names
+          flake8 src --count --select=E9,F63,F7,F82 --show-source --statistics
+          ruff check src
+
+      - name: Verify installation (Smoke Test)
+        run: |
+          stmut-hires --help
+
+  # Stage 2: Continuous Delivery (Docker Build and Push)
+  docker-build:
+    needs: test
+    runs-on: ubuntu-latest
+    # Only builds the image when code is pushed directly to master
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # Log in to Docker Hub using secrets
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+            username: ${{ secrets.DOCKERHUB_USERNAME }}
+            password: ${{ secrets.DOCKERHUB_TOKEN }}
+      # Build and push the image
+      - name: Build and Push Docker image
+        uses: docker/build-push-action@v6
+        with:
+            context: .
+            push: true
+            tags: |
+              ${{ secrets.DOCKERHUB_USERNAME }}/stmut-hires:latest
+              ${{ secrets.DOCKERHUB_USERNAME }}/stmut-hires:v0.1.0

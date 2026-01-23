@@ -1,7 +1,6 @@
 import os
 import glob
 import logging
-import pandas as pd
 from abc import ABC, abstractmethod
 from importlib import resources
 
@@ -78,7 +77,7 @@ class InitialStepConfig(BaseConfig):
         """Method to upate config with paths generated during Step1."""
         self.expression_file = expression_file_path
         self.ensembl_file = ensembl_file_path
-        self.logger.info(f"Config updated with Step 1 outputs.")
+        self.logger.info("Config updated with Step 1 outputs.")
 
 class MergerConfig(InitialStepConfig):
     """Configuration for the barcode merger step."""

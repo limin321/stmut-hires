@@ -1,10 +1,8 @@
-import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-from matplotlib.colors import LinearSegmentedColormap, Normalize
+from matplotlib.colors import Normalize
 from matplotlib.gridspec import GridSpec
 import seaborn as sns
-import os
 
 class CNVSortedbyClusters:
     """Responsible for plotting cluster sorted CNV heatmap"""
@@ -19,7 +17,6 @@ class CNVSortedbyClusters:
         # 1.2 Define the colors: Set vmin and vmax for a data-driven color scale
         #vmin_val = np.min(cnv_matrix.values)
         #vmax_val = np.max(cnv_matrix.values)
-        center_val = 0.0
         norm = Normalize(vmin=-1, vmax=0.8) # If you are using Matplotlib's pcolormesh or imshow directly, use this:
 
         myCol = sns.diverging_palette(

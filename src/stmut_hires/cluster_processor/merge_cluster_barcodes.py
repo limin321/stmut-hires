@@ -38,7 +38,6 @@ class BarcodeMerger:
         stats_calculator = ExpressionStatisticsCalculator()
         expression_stats, summed_expr = stats_calculator.calculate_expression_stats(cluster_spatial_coords, parquet_file)
         
-        end_time_stats_build = time.time()
         initial_spatial_df_len = len(cluster_spatial_coords)
         
         tqdm.write(f"Starting main barcode processing for {initial_spatial_df_len} initial spots...")

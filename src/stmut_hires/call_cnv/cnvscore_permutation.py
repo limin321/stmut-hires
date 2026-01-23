@@ -122,9 +122,6 @@ class CNVScore:
         arr_permuted_cols = arr[np.arange(arr.shape[0])[:, None], row_permutations]
 
         # --2. Permute rows within each column independently --
-        # This process is similar to Step 1, but applied vertically (axis=0)
-        N_rows = arr.shape[0]
-
         # For each column, generate a unique random permutation of row indices [0, 1, ..., N_rows-1]
         col_permutations = np.argsort(np.random.rand(*arr.shape), axis=0)
 

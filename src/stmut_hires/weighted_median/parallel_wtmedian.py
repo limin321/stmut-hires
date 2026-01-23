@@ -1,7 +1,6 @@
 import os
 import multiprocessing as mp
 import logging 
-from importlib import resources
 
 # Assuming these imports are correct
 from .cnr_reader import CnrReader
@@ -79,6 +78,6 @@ class WorkflowOrchestrator:
         # Prepare argument tuples for starmap
         tasks = [(cnr_file, self.bed_file, self.output_dir) for cnr_file in self.cnr_files]
         with mp.Pool(processes=self.cores) as pool:
-            results = pool.starmap(WorkflowOrchestrator._single_cnr_weighted_median, tasks)
+            pool.starmap(WorkflowOrchestrator._single_cnr_weighted_median, tasks)
 
    

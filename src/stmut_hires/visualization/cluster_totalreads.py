@@ -40,7 +40,6 @@ class ClusterTotalReads:
                 label_loc = 0.5 *len(rate)
                 labels_reads.append(label_loc)
             else:
-                len1 = max(labels_reads) # get the previous location and summed lengths
                 label_loc = 0.5 *(len(rate)) + sum(sequential_lens[:t1-1])
                 labels_reads.append(label_loc)
 

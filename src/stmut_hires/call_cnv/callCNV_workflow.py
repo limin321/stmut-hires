@@ -1,6 +1,5 @@
 import logging
 import os
-import sys
 from typing import Optional # version-safe, "str | None only for python 3.10+"
 
 
@@ -120,7 +119,7 @@ class CNVCallPlotWorkflow:
         linkage_method: Optional[str] = None,
     ):
         """ Prepare chromosome and cluster, totalreads for plotting."""
-        self.logger.info(f"Ploting CNV heatmap sorted by cluster, total_reads, and unrooted hierarchical.")
+        self.logger.info("Ploting CNV heatmap sorted by cluster, total_reads, and unrooted hierarchical.")
         chr_meta = SortedChrom.gene_count_per_chr(self.cdt_meta)
         (sorted_cluster_tumor,reads_normalized,labels_reads,uniq_clusters) = ClusterTotalReads.reads_his_params(self.cdt_sortedby_cluster_totalreads)
         

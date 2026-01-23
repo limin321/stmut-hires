@@ -2,10 +2,9 @@ import pandas as pd
 import numpy as np
 import logging
 import scipy.cluster.hierarchy as sch 
-from scipy.spatial.distance import pdist, squareform
+from scipy.spatial.distance import pdist
 import seaborn as sns
 from matplotlib.colors import LinearSegmentedColormap
-import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
 
 class UnrootedCNVHeatmap:

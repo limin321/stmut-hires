@@ -1,6 +1,4 @@
-import os
 import pandas as pd
-import numpy as np
 import logging
 
 from stmut_hires.call_cnv.cnvscore_permutation import CNVScore

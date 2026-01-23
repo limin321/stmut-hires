@@ -77,7 +77,6 @@ class CNVWriter:
         tables_dir = CNVWriter._ensure_tables_dir(output_dir)
         output_file = os.path.join(tables_dir, "CNVs_RankedbySimilaritytoDNA_Quintiles4Loupe.csv")
         try:
-            output_dir_tables = os.path.join(output_dir, "tables")
             all_barcodes_quintiles.to_csv(output_file, index=False)
             logger.info(f"Saved barcode quintiles to {output_file}")
         except Exception as e:

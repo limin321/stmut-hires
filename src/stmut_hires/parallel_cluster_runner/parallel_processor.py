@@ -3,9 +3,9 @@ import logging
 import multiprocessing
 
 
-from stmut_hires.parallel.spatial_loader import SpatialDataLoader
-from stmut_hires.parallel.output_manager import OutputDirManager
-from stmut_hires.parallel.cluster_merger import ClusterMerger
+from stmut_hires.data_io.spatial_loader import SpatialDataLoader
+from stmut_hires.parallel_cluster_runner.output_manager import OutputDirManager
+from stmut_hires.parallel_cluster_runner.cluster_merger import ClusterMerger
 
 class ParallelClusterProcessor:
     """Responsible for parallel processing of clusters"""

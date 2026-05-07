@@ -15,11 +15,12 @@ import pyarrow.parquet as pq
 # Multiprocessing
 from stmut_hires.cli_parser import CommandLineParser
 from stmut_hires.config import CNVAnalysisConfig
-from stmut_hires.split_cluster_expr.cluster_processor import ClusterExpressionProcessor
-from stmut_hires.parallel.parallel_processor import ParallelClusterProcessor
+from stmut_hires.data_io.validators import InputValidator
+from stmut_hires.split_cluster_expr.cluster_expr_generator import ClusterExpressionProcessor
+from stmut_hires.parallel_cluster_runner.parallel_processor import ParallelClusterProcessor
 from stmut_hires.weighted_median.parallel_wtmedian import WorkflowOrchestrator
 from stmut_hires.call_cnv.callCNV_workflow import CNVCallPlotWorkflow
-from stmut_hires.parallel.output_manager import OutputDirManager
+from stmut_hires.parallel_cluster_runner.output_manager import OutputDirManager
 
 
 
@@ -95,13 +96,21 @@ def main():
         expression_file_pattern = os.path.join(intermediate_cluster_dir, "Cluster*.parquet")
         ensembl_path = os.path.join(intermediate_cluster_dir, "ensembl.csv")
 
-        files_exist = glob.glob(expression_file_pattern)  
-
-        # Set the config paths right away to where the files *should* be
         config.set_step1_outputs(
             expression_file_path = expression_file_pattern,
             ensembl_file_path = ensembl_path
         )
+
+        # Validate all raw inputs before doing any work.
+        InputValidator(config).validate_run()
+
+        if args.dry_run:
+            logger.info("All inputs validated successfully. Dry-run complete — no files written.")
+            return
+
+        logger.info("Starting normal processing mode")
+
+        files_exist = glob.glob(expression_file_pattern)
 
         if files_exist:
             logger.info(f"Intermediate cluster files found in '{intermediate_cluster_dir}'.")
@@ -110,10 +119,8 @@ def main():
                 verify_parquet_files(expression_file_pattern, logger)
 
             except IOError as e:
-                # This handles both "No files found" and "Corrupted files detected" errors
                 logger.error(e)
                 logger.info("Corrupt files detected. Forcing re-run of Step 1 processing.")
-                # Optional: Clean up existing broken files before the re-run starts
                 for f in glob.glob(expression_file_pattern) + [ensembl_path]:
                     if os.path.exists(f):
                         os.remove(f)
@@ -123,18 +130,8 @@ def main():
 
         if not files_exist:
             logger.info("Starting step 1 processing...")
-            processor = ClusterExpressionProcessor(config, dry_run=args.dry_run)
+            processor = ClusterExpressionProcessor(config)
             processor.process()
-
-        # The crucial change: The validation should happen *here*, 
-        # after we are certain that either existing files passed verification, or new files have just been created by processor.process().
-        # Then call the config obj defined above, it inherites other classes in the config.py file.
-        config.validate_inputs()
-
-        if args.dry_run:
-            logger.info("Starting dry-run mode - no files will be written")
-        else:
-            logger.info("Starting normal processing mode")
         
         logger.info("Starting Step 2 (ParallelClusterProcessor/Merger)...")
         # Create output folders
@@ -220,6 +217,7 @@ def main():
 
     elif args.command == "call-cnv":
         logger.info("Re-running Step 6: calling CNV ...")
+        InputValidator(config).validate_call_cnv()
         workflow = CNVCallPlotWorkflow(config=config)
         workflow.cnv_workflow(
             ncluster=config.ncluster,

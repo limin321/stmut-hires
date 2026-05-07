@@ -1,10 +1,11 @@
 import os
 import multiprocessing as mp
 import logging 
+import traceback
 
 # Assuming these imports are correct
-from .cnr_reader import CnrReader
-from .centromere_reader import CentromereReader
+from stmut_hires.data_io.cnr_reader import CnrReader
+from stmut_hires.data_io.centromere_reader import CentromereReader
 from .weighted_median import ArmWeightedMedian
 from .cnr_writer import WtMedianWriter
 
@@ -64,7 +65,8 @@ class WorkflowOrchestrator:
             return f"[SUCCESS] Processed {cnr_name}"
 
         except Exception as e:
-            return f"[ERROR] Failed to process {cnr_file}: {e}"
+            tb = traceback.format_exc()
+            return f"[ERROR] Failed to process {cnr_file}: \n{tb}"
 
 
     def run_parallel_workflow(self):
@@ -78,6 +80,9 @@ class WorkflowOrchestrator:
         # Prepare argument tuples for starmap
         tasks = [(cnr_file, self.bed_file, self.output_dir) for cnr_file in self.cnr_files]
         with mp.Pool(processes=self.cores) as pool:
-            pool.starmap(WorkflowOrchestrator._single_cnr_weighted_median, tasks)
+            results = pool.starmap(WorkflowOrchestrator._single_cnr_weighted_median, tasks)
+
+        for r in results:
+            print(r, flush=True)
 
    

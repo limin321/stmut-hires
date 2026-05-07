@@ -1,5 +1,5 @@
-from .cluster_reader import ClusterReader
-from .h5_reader import H5MatrixReader
+from stmut_hires.data_io.cluster_reader import ClusterReader
+from stmut_hires.data_io.h5_reader import H5MatrixReader
 from .matrix_builder import ExpressionMatrixBuilder
 from .gene_writer import GeneDataWriter
 from tqdm import tqdm

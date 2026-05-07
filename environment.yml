@@ -1,4 +1,4 @@
-name: stmut-hires
+name: stmut-test
 channels:
   - conda-forge
   - bioconda

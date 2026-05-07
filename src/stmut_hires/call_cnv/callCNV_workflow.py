@@ -4,9 +4,9 @@ from typing import Optional # version-safe, "str | None only for python 3.10+"
 
 
 from stmut_hires.call_cnv.barcodes_summary import ClusterSummary
-from stmut_hires.call_cnv.cluster_annotate import LoadAnnotate
+from stmut_hires.data_io.annotate_reader import AnnotateReader
 from stmut_hires.call_cnv.annotate_barcode import IntegrateAnnotate
-from stmut_hires.call_cnv.load_cdt import Loadcdt
+from stmut_hires.data_io.cdt_loader import CdtLoader
 from stmut_hires.call_cnv.infer_cnv import InferCNV
 from stmut_hires.call_cnv.save_cnv import CNVWriter
 from stmut_hires.visualization.chromosome_meta import SortedChrom
@@ -93,11 +93,11 @@ class CNVCallPlotWorkflow:
         clustersum = ClusterSummary(self.dirpath,self.graph_based_csv)
         merged_df = clustersum.merge_cluster_summary()
         merged_barcode_summary = clustersum.cluster_summary()
-        annotate = LoadAnnotate.load_annotate(self.annotate_csv)       
+        annotate = AnnotateReader.load_annotate(self.annotate_csv)       
         annotated_barcode = IntegrateAnnotate(annotate,merged_barcode_summary).annotate_barcode()
 
         # Load, normalize cdt, call CNV.
-        cdt_matrix, cdt_meta = Loadcdt.cdt_loader(self.cdt_file)
+        cdt_matrix, cdt_meta = CdtLoader.cdt_loader(self.cdt_file)
         cdt = InferCNV(cdt_matrix,annotated_barcode)
         nontumor_normalized_cdt = cdt.cdt_processor() # same as c6 in R
         # sort cnv first by cluster then by total reads

@@ -78,4 +78,4 @@ jobs:
             push: true
             tags: |
               ${{ secrets.DOCKERHUB_USERNAME }}/stmut-hires:latest
-              ${{ secrets.DOCKERHUB_USERNAME }}/stmut-hires:v0.1.0
+              ${{ secrets.DOCKERHUB_USERNAME }}/stmut-hires:sha-${{ github.sha }}

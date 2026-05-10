@@ -47,6 +47,17 @@ class CommandLineParser:
             "call-cnv", 
             parents=[global_parent,step6_parent], 
             help="Run Step 6: calling CNV..only")
+
+        # Independent clean sub-command
+        clean_step = argparse.ArgumentParser(add_help=False)
+        clean_step.add_argument("--output_dir", required=True, help="Output directory to clean.")
+        
+        subparsers.add_parser(
+            "clean",
+            parents=[clean_step],
+            help="Clean intermediate output folders, keeping only figures/ and tables/.",
+
+        )
         
         return parser.parse_args()
 

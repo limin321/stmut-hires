@@ -21,6 +21,7 @@ from stmut_hires.parallel_cluster_runner.parallel_processor import ParallelClust
 from stmut_hires.weighted_median.parallel_wtmedian import WorkflowOrchestrator
 from stmut_hires.call_cnv.callCNV_workflow import CNVCallPlotWorkflow
 from stmut_hires.parallel_cluster_runner.output_manager import OutputDirManager
+from stmut_hires.data_io.output_cleaner import OutputCleaner
 
 
 
@@ -58,6 +59,11 @@ def main():
     args = CommandLineParser.parse_args()
     # Setup logging
     logger = setup_logging()
+
+    # Handle clean before config is built — it doesn't need building config for clean step only.
+    if args.command == "clean":
+        OutputCleaner(args.output_dir).clean()
+        return
 
     args_dict = vars(args)
 

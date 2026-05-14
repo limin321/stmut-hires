@@ -1,7 +1,9 @@
 from stmut_hires.data_io.cluster_reader import ClusterReader
 from stmut_hires.data_io.h5_reader import H5MatrixReader
+from .filter_before_grouping import FilterOutCrappyData
 from .matrix_builder import ExpressionMatrixBuilder
 from .gene_writer import GeneDataWriter
+from stmut_hires.visualization.qc_plots import QCplot
 from tqdm import tqdm
 import logging
 
@@ -14,8 +16,10 @@ class ClusterExpressionProcessor:
         self.logger = logging.getLogger(__name__)
         self.cluster_reader = ClusterReader()
         self.h5_reader = H5MatrixReader(config.exp_h5)
+        self.filter = FilterOutCrappyData(config)
         self.matrix_builder = ExpressionMatrixBuilder()
         self.gene_writer = GeneDataWriter(config.output_dir, dry_run=dry_run)
+        self.qc_plot = QCplot(config.output_dir)
 
     def process(self):
         """ Main processing workflow """
@@ -28,8 +32,13 @@ class ClusterExpressionProcessor:
 
         # Read hdf5 matrix
         self.logger.info("Reading HDF5 matrix data...")
-        matrix_data = self.h5_reader.read_matrix_data()
-        self.logger.info(f"Matrix shape: {matrix_data['shape']}")
+        mat_dict = self.h5_reader.read_matrix_data()
+        self.logger.info(f"Matrix shape: {mat_dict['shape']}")
+
+        # Filter crappy data
+        self.logger.info("Filter out low quality barcodes...")
+        df, cutoff = self.filter.get_filter_cutoff(mat_dict=mat_dict, bw_method=self.config.bw_method, filter_cutoff=self.config.filter_cutoff)
+        matrix_data, filtered_df = self.filter.filtered_dict(mat_dict, cutoff, df)
 
         # Build expression Matrix
         self.logger.info("Building expression matrix...")
@@ -39,6 +48,9 @@ class ClusterExpressionProcessor:
 
         # Save gene ids
         self.gene_writer.save_gene_ids(matrix_data['genes'])
+
+        # Generate QC plots - before/after filtering
+        self.qc_plot.qc_hist(df, filtered_df)
 
         # Process each cluster
         self._process_clusters(

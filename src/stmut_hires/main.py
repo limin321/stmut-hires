@@ -73,6 +73,9 @@ def main():
         config = CNVAnalysisConfig(
             clusterf=args_dict.get('cluster_file'),
             exp_h5=args_dict.get('exp_h5'),
+            filter_cutoff = args_dict.get('manual_cutoff'),
+            bw_method = args_dict.get('bw_method'),
+
             spatial_file=args_dict.get('spatial_file'),
             num_processes=args_dict.get('num_processes'),
             cutoff=args_dict.get('cutoff', 1000),
@@ -173,7 +176,7 @@ def main():
             txt_files = glob.glob(os.path.join(txt_output_dir, "*.txt"))
             logger.info(f"Running import-rna on {len(txt_files)} files...")
             full_cmd = (
-                f"ulimit -s 65536 && cd {txt_output_dir} && "
+                f"ulimit -s unlimited && cd {txt_output_dir} && "
                 f'python -c "{patch_code}" import-rna '
                 f"-f counts -g {config.gene_info} -c {config.corr_file} "
                 f"--output-dir {cnr_dir} " 
@@ -198,7 +201,7 @@ def main():
         cnr_files_list = glob.glob(os.path.join(wtcnr_dir, "*.cnr"))
 
         export_shell_cmd = (
-            f"ulimit -s 65536 && "
+            f"ulimit -s unlimited && "
             f"cd {wtcnr_dir} && "
             f"cnvkit.py export cdt *.cnr -o {cdt_dir}/grpWt.cdt"
         )
@@ -206,9 +209,9 @@ def main():
         logger.info(f"Exporting CDT for {len(cnr_files_list)} files...")
         try:
             subprocess.run(export_shell_cmd, shell=True, check=True)
-            print("Export successful.")
+            logger.info("Export successful.")
         except subprocess.CalledProcessError as e:
-            print(f"Error during export: {e}")
+            logger.info(f"Error during export: {e}")
 
 
         logger.info("Starting step 6: calling CNV...")

@@ -83,6 +83,7 @@ docker run --rm \
     --cluster_file /data/input/Graph-Based.csv \
     --spatial_file /data/input/spatial/tissue_positions.parquet \
     --output_dir /data/outs \
+    --manul_cutoff 50 \
     --cutoff 3000 \
     --num_processes 10 \
     --annotate_file /data/input/annotate.csv \
@@ -146,6 +147,7 @@ stmut-hires run \
     --num_processes 10 \
     --annotate_file ${INDIR}/annotate.csv \
     --bulkCNV_file ${INDIR}/bulkCNV.csv \
+    --manul_cutoff 50 \
     --cores 10 \
     --pmtimes 50 \
     --ncluster 6
@@ -199,7 +201,6 @@ outs
 └── wtcnr
 ```
 
-
 #### 3. Rerun CNV calling step
 It is typically difficult to infer copy number alterations on the X-chr with gene expression data. One copy of the X-chr is silenced via X-inactivation. If the inactive copy of X is subjected to a CNA, it would not show up in the gene expression data. If the active copy is gained, better to include X-chr just to rerun the RankedBySimilarity analysis.
 
@@ -220,14 +221,41 @@ stmut-hires call-cnv \
     --ncluster 6
 ```
 
+#### 4. Clean output
+After running the pipeline, you can clean the output by running `stmut-hires clean` subcommand.
+The only input is the `--output_dir` you used to run the pipeline.
+```
+$ stmut-hires clean --help
+usage: stmut-hires clean [-h] --output_dir OUTPUT_DIR
+
+options:
+  -h, --help            show this help message and exit
+  --output_dir OUTPUT_DIR
+                        Output directory to clean.
+```
+
+
+
 ### Help
 ```
-stmut-hires run --help
-usage: stmut-hires run [-h] --output_dir OUTPUT_DIR --cluster_file CLUSTER_FILE [--dry_run] --exp_h5 EXP_H5
-                       --spatial_file SPATIAL_FILE [--num_processes NUM_PROCESSES] [--cutoff CUTOFF]
-                       [--window WINDOW] [--cores CORES] [--annotate_file ANNOTATE_FILE]
-                       [--bulkCNV_file BULKCNV_FILE] [--pmtimes PMTIMES] [--ncluster NCLUSTER]
-                       [--distance_metric DISTANCE_METRIC] [--linkage_method LINKAGE_METHOD]
+usage: stmut-hires [-h] {run,call-cnv,clean} ...
+
+CNV Analysis Pipeline.
+
+positional arguments:
+  {run,call-cnv,clean}  Available commands
+    run                 Run full pipeline.
+    call-cnv            Run Step 6: calling CNV..only
+    clean               Clean intermediate output folders, keeping only figures/ and tables/.
+
+options:
+  -h, --help            show this help message and exit
+(stmut-filter) [lchen@localhost stmut-hires]$ stmut-hires run --help
+usage: stmut-hires run [-h] --output_dir OUTPUT_DIR --cluster_file CLUSTER_FILE [--dry_run] --exp_h5 EXP_H5 --spatial_file
+                       SPATIAL_FILE [--manual_cutoff MANUAL_CUTOFF] [--num_processes NUM_PROCESSES] [--cutoff CUTOFF]
+                       [--window WINDOW] [--cores CORES] [--bw_method BW_METHOD] [--annotate_file ANNOTATE_FILE]
+                       [--bulkCNV_file BULKCNV_FILE] [--pmtimes PMTIMES] [--ncluster NCLUSTER] [--distance_metric DISTANCE_METRIC]
+                       [--linkage_method LINKAGE_METHOD]
 
 options:
   -h, --help            show this help message and exit
@@ -239,15 +267,21 @@ options:
   --exp_h5 EXP_H5       Gene expression matrix (h5)
   --spatial_file SPATIAL_FILE
                         Barcodes spatial coordinates.(./spatial/tissue_positions.parquet)
+  --manual_cutoff MANUAL_CUTOFF
+                        Cutoff to filter-out barcodes with low gene counts (INT, default: None). You either set this parameter or
+                        `--bw_method` to filter-out low-quality barcodes.
   --num_processes NUM_PROCESSES
                         The number of processes used for parallel (default: None)
   --cutoff CUTOFF       The min number of genes in a new spot as grouping cutoff. (default: 1000)
   --window WINDOW       The nearest-neighbor spots for selecting grouping candidates. (default): 100
   --cores CORES         Number of cores to run weighted-median parallelly
+  --bw_method BW_METHOD
+                        Bandwidth scaling factor for KDE valley detection (e.g., 0.1 to 0.9). For it to work, `--manual_cutoff`
+                        needs to be default value None.
   --annotate_file ANNOTATE_FILE
                         Two-column clusters annotated csv file.
   --bulkCNV_file BULKCNV_FILE
-                        Two-column csv storing bulk-CNV info.
+                        [Optional] Two-column csv storing bulk-CNV info.
   --pmtimes PMTIMES     The number of permutation times.
   --ncluster NCLUSTER   Number of clusters for CNV plot.
   --distance_metric DISTANCE_METRIC

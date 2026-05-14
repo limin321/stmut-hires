@@ -18,6 +18,8 @@ class CommandLineParser:
         step1_5_parent = argparse.ArgumentParser(add_help=False)
         step1_5_parent.add_argument("--exp_h5", required=True, help="Gene expression matrix (h5)")
         step1_5_parent.add_argument("--spatial_file", required=True, help="Barcodes spatial coordinates.(./spatial/tissue_positions.parquet)")
+        step1_5_parent.add_argument("--manual_cutoff", required=False, default= None, type=int,
+                            help="Cutoff to filter-out barcodes with low gene counts (INT, default: %(default)s). You either set this parameter or `--bw_method` to filter-out low-quality barcodes.")
         step1_5_parent.add_argument("--num_processes", required=False, default=None,type=int, 
                             help="The number of processes used for parallel (default: %(default)s)")
         step1_5_parent.add_argument("--cutoff", required=False, default=1000,type=int, 
@@ -25,6 +27,8 @@ class CommandLineParser:
         step1_5_parent.add_argument("--window", required=False, default=100,type=int, 
                             help="The nearest-neighbor spots for selecting grouping candidates. (default): %(default)s")
         step1_5_parent.add_argument("--cores", default=4, type=int, help="Number of cores to run weighted-median parallelly")
+        step1_5_parent.add_argument("--bw_method", required=False, default=0.1, type=float,
+                            help="Bandwidth scaling factor for KDE valley detection (e.g., 0.1 to 0.9). For it to work, `--manual_cutoff` needs to be default value None.")
         
         # 3. Step 6 Parent: Required for both 'run' and 'call-cnv'
         step6_parent = argparse.ArgumentParser(add_help=False)

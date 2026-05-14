@@ -25,10 +25,20 @@ class BaseConfig:
 class InitialStepConfig(BaseConfig):
     """Configuration for step 1: reading cluster and expression inputs."""
 
-    def __init__(self, clusterf=None, exp_h5=None, **kwargs):
+    def __init__(
+        self, 
+        clusterf=None, 
+        exp_h5=None, 
+        bw_method=0.1,
+        filter_cutoff=None,
+        **kwargs
+    ):
         super().__init__(**kwargs)
         self.clusterf = clusterf
         self.exp_h5 = exp_h5
+        self.bw_method = bw_method
+        self.filter_cutoff = filter_cutoff
+        
         self.expression_file = None
         self.ensembl_file = None
 

@@ -4,6 +4,17 @@ All notable changes to stmut-hires will be documented in this file.
 
 ## [2026-01-04]
 ### Added
+- **Sub-command `clean`**: Clean the output folder.
+- **Filter Low Quality Barcodes**: Either Automatical predict cutoff (by default) by setting `--bw_method`, or user provided cutoff by setting `--manual_cutoff`
+
+### Fixed
+- restructure IO by adding `data_io` module
+- fix only pArms genes exist
+- automatic add docker tag in CI/CD
+
+
+## [2026-01-04]
+### Added
 - **Sub-command `call-cnv`**: Dedicated workflow to rerun CNV calling (Step 6), specifically optimized for X-chromosome gain/loss recovery.
 - **Grouping Analytics**: Automated generation of `grouped_spotSummary.csv` and histogram plots to visualize bin grouping statistics.
 - **HPC Stability Fix**: Integrated environment activation hooks to resolve `CXXABI_1.3.15` and `libstdc++.so.6` linking issues on enterprise Linux (CentOS 7).

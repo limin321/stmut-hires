@@ -2,7 +2,7 @@ name: CI/CD Pipeline
 
 on:
   push:
-    branches: [ "master" ]
+    branches: [ "master", "ubuntu-claude-work" ]
   pull_request:
     branches: [ "master" ]
   workflow_dispatch: # This adds a "Run workflow" button in the Actions tab
@@ -59,7 +59,8 @@ jobs:
     needs: test
     runs-on: ubuntu-latest
     # Only builds the image when code is pushed directly to master
-    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    # if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    if: github.event_name == 'push' 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -78,4 +79,5 @@ jobs:
             push: true
             tags: |
               ${{ secrets.DOCKERHUB_USERNAME }}/stmut-hires:latest
+              ${{ secrets.DOCKERHUB_USERNAME }}/stmut-hires:${{ github.ref_name }}
               ${{ secrets.DOCKERHUB_USERNAME }}/stmut-hires:sha-${{ github.sha }}

@@ -66,7 +66,7 @@ class WorkflowOrchestrator:
 
         except Exception as e:
             tb = traceback.format_exc()
-            return f"[ERROR] Failed to process {cnr_file}: \n{tb}"
+            return f"[ERROR] Failed to process {cnr_file}: {e}\n{tb}"
 
 
     def run_parallel_workflow(self):

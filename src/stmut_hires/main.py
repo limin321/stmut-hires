@@ -5,6 +5,7 @@ import sys
 import logging
 import glob
 import subprocess
+
 import pyarrow
 import pyarrow.parquet as pq
 
@@ -22,6 +23,8 @@ from stmut_hires.weighted_median.parallel_wtmedian import WorkflowOrchestrator
 from stmut_hires.call_cnv.callCNV_workflow import CNVCallPlotWorkflow
 from stmut_hires.parallel_cluster_runner.output_manager import OutputDirManager
 from stmut_hires.data_io.output_cleaner import OutputCleaner
+from stmut_hires.adapters.atera_adapter import AteraAdapter
+from stmut_hires.metadata.metadata import PipelineMetadataManager
 
 
 
@@ -42,9 +45,10 @@ def verify_parquet_files(file_pattern, logger):
     files = glob.glob(file_pattern)
     if not files:
         dir_path = os.path.dirname(file_pattern)
-        raise IOError(f"NO parquet files are detected in directory: ${dir_path}")
+        raise IOError(f"NO parquet files are detected in directory: {dir_path}")
     
     logger.info(f"Verifying {len(files)} parquet files...")
+
     for file_path in files:
         try:
             pq.read_schema(file_path)
@@ -54,10 +58,131 @@ def verify_parquet_files(file_pattern, logger):
     logger.info(f"All {len(files)} parquet files verified successfully.")
     return True
 
+"""  
+Design Structure:
+CLI
+  ↓
+platform adapter
+  ↓
+metadata.json
+  ↓
+config.resolve_canonical_inputs()
+  ↓
+pipeline
+
+
+
+cli_parser/
+    only parses args
+
+adapters/
+    converts platform formats
+
+metadata/
+    stores pipeline state
+
+config/
+    stores runtime resolved configuration
+
+validators/
+    validates resolved runtime state
+
+workflows/
+    execute business logic
+
+
+"""
+
+def prepare_inputs_for_run(args_dict, logger):
+    """ 
+    Resolve canonical + raw inputs. Does NOT write metadata.json.
+    """
+
+    input_mode = args_dict["input_mode"]
+
+    # Prepare canonical inputs for the pipeline regardless of platform
+    if input_mode == "visiumhd":
+        canonical_inputs = {
+            "cluster_file": args_dict["cluster_file"],
+            "spatial_file": args_dict["spatial_file"],
+            "exp_h5": args_dict["exp_h5"]
+        }
+
+        raw_inputs = canonical_inputs.copy()
+
+    elif input_mode == "atera":
+        logger.info("Running Atera adapter conversion...")
+        atera_converter = AteraAdapter(args_dict["output_dir"], dry_run=args_dict.get("dry_run", False))
+        cluster_file = atera_converter.get_graph_based(
+            args_dict["analysis_zarr_zip"], args_dict["cells_parquet"]
+        )
+        spatial_file = atera_converter.get_tissue_position_parquet(
+            args_dict["cells_parquet"]
+        )
+
+        canonical_inputs = {
+            "cluster_file": cluster_file,
+            "spatial_file": spatial_file,
+            "exp_h5": args_dict["exp_h5"],
+        }
+        raw_inputs = {
+            "cells_parquet": args_dict["cells_parquet"],
+            "analysis_zarr_zip": args_dict["analysis_zarr_zip"],
+            "exp_h5": args_dict["exp_h5"],
+        }
+
+    
+    else:
+        raise ValueError(f"Unsupported input mode: {input_mode}")
+
+    # Create metadata manager
+    metadata_manager = PipelineMetadataManager(
+        output_dir = args_dict.get("output_dir")
+    )
+    return metadata_manager, canonical_inputs, raw_inputs
+
+
+def build_config(args_dict, metadata_manager, canonical_inputs):
+    """ 
+    Build runtime config object.
+    Canonical inputs are resolved from metadata.json
+    """
+    # Use vars(args).get() to safely handle arguments that might be missing
+    # depending on which subcommand (run vs call-cnv) was used.
+    config = CNVAnalysisConfig(
+        canonical_inputs=canonical_inputs,
+        metadata_manager=metadata_manager,
+
+        filter_cutoff = args_dict.get('manual_cutoff'),
+        bw_method = args_dict.get('bw_method'),
+
+        num_processes=args_dict.get('num_processes'),
+        cutoff=args_dict.get('cutoff', 1000),
+        window=args_dict.get('window', 100),
+
+        output_dir=args_dict.get('output_dir'),
+        dry_run=args_dict.get('dry_run'),
+        cores=args_dict.get('cores', 4),
+
+        annotate_csv=args_dict.get('annotate_file'),
+        bulk_csv=args_dict.get('bulkCNV_file'),
+
+        ncluster=args_dict.get('ncluster', 6),
+        pmtimes=args_dict.get('pmtimes', 5),
+        distance_metric=args_dict.get(
+            'distance_metric', 
+            'euclidean'
+        ),
+        linkage_method=args_dict.get(
+            'linkage_method', 
+            'ward'
+        ),
+    )
+
+    return config
 
 def main():    
     args = CommandLineParser.parse_args()
-    # Setup logging
     logger = setup_logging()
 
     # Handle clean before config is built — it doesn't need building config for clean step only.
@@ -67,38 +192,48 @@ def main():
 
     args_dict = vars(args)
 
+    # ==========================================================
+    # Resolve inputs + build config
+    # (metadata.json is NOT written yet for `run` — done after validation)
+    # ==========================================================
     try:
-        # Use vars(args).get() to safely handle arguments that might be missing
-        # depending on which subcommand (run vs call-cnv) was used.
-        config = CNVAnalysisConfig(
-            clusterf=args_dict.get('cluster_file'),
-            exp_h5=args_dict.get('exp_h5'),
-            filter_cutoff = args_dict.get('manual_cutoff'),
-            bw_method = args_dict.get('bw_method'),
+        if args.command == "run":
+            metadata_manager, canonical_inputs, raw_inputs = prepare_inputs_for_run(
+                args_dict, logger
+            )
 
-            spatial_file=args_dict.get('spatial_file'),
-            num_processes=args_dict.get('num_processes'),
-            cutoff=args_dict.get('cutoff', 1000),
-            window=args_dict.get('window', 100),
+        elif args.command == "call-cnv":
+            metadata_manager = PipelineMetadataManager(
+                output_dir=args_dict["output_dir"]
+            )
+            md = metadata_manager.load_metadata()
+            # Re-running Step 6: pull canonical inputs from the existing metadata.json
+            canonical_inputs = md["canonical_inputs"]
+            for k, v in md.get("runtime_params", {}).items():
+                if args_dict.get(k) is None:
+                    args_dict[k] = v
+            raw_inputs = None  # unused for call-cnv
 
-            output_dir=args_dict.get('output_dir'),
-            dry_run=args_dict.get('dry_run'),
-            cores=args_dict.get('cores', 4),
+        else:
+            raise ValueError(f"Unsupported command: {args.command}")
 
-            annotate_csv=args_dict.get('annotate_file'),
-            bulk_csv=args_dict.get('bulkCNV_file'),
-            ncluster=args_dict.get('ncluster', 6),
-            pmtimes=args_dict.get('pmtimes', 5),
-            distance_metric=args_dict.get('distance_metric', 'euclidean'),
-            linkage_method=args_dict.get('linkage_method', 'ward'),
-        )
-    except (FileNotFoundError, TypeError, NotADirectoryError) as e:
+        config = build_config(args_dict, metadata_manager, canonical_inputs)
+
+    except (
+        FileNotFoundError,
+        TypeError,
+        NotADirectoryError,
+        ValueError,
+        KeyError,
+    ) as e:
         logger.error(f"Configuration Error: {e}")
         sys.exit(1)
 
+    # ==========================================================
+    # Run Pipeline
+    # ==========================================================
     if args.command == "run":
         logger.info("Running full pipeline ...")
-
 
         # Define the directory where intermediate cluster parquet files are stored.
         intermediate_cluster_dir = os.path.join(config.output_dir, "cluster_exp")
@@ -106,19 +241,37 @@ def main():
         ensembl_path = os.path.join(intermediate_cluster_dir, "ensembl.csv")
 
         config.set_step1_outputs(
-            expression_file_path = expression_file_pattern,
-            ensembl_file_path = ensembl_path
+            expression_file_path=expression_file_pattern,
+            ensembl_file_path=ensembl_path,
         )
 
         # Validate all raw inputs before doing any work.
         InputValidator(config).validate_run()
 
-        if args.dry_run:
-            logger.info("All inputs validated successfully. Dry-run complete — no files written.")
+        if config.dry_run:
+            logger.info("Dry-run complete. Inputs validated successfully.")
             return
 
-        logger.info("Starting normal processing mode")
+        # Only persist metadata after inputs are confirmed good.
+        metadata_manager.initialize_metadata(
+            platform=args_dict["input_mode"],
+            canonical_inputs=canonical_inputs,
+            raw_inputs=raw_inputs,
+            runtime_params={
+                "bw_method": config.bw_method,
+                "manual_cutoff": config.filter_cutoff,
+                "cutoff": config.cutoff,
+                "window": config.window,
+                "distance_metric": config.distance_metric,
+                "linkage_method": config.linkage_method,
+                "ncluster": config.ncluster,
+                "pmtimes": config.pmtimes,
+            },
+            completed_steps=["adapter_conversion"],
+        )
+        logger.info("Metadata initialized successfully.")
 
+        # STEP 1 ...
         files_exist = glob.glob(expression_file_pattern)
 
         if files_exist:
@@ -129,7 +282,11 @@ def main():
 
             except IOError as e:
                 logger.error(e)
-                logger.info("Corrupt files detected. Forcing re-run of Step 1 processing.")
+                logger.info(
+                    "Corrupt files detected. "
+                    "Re-running of Step 1."
+                )
+
                 for f in glob.glob(expression_file_pattern) + [ensembl_path]:
                     if os.path.exists(f):
                         os.remove(f)
@@ -141,24 +298,36 @@ def main():
             logger.info("Starting step 1 processing...")
             processor = ClusterExpressionProcessor(config)
             processor.process()
-        
-        logger.info("Starting Step 2 (ParallelClusterProcessor/Merger)...")
-        # Create output folders
-        output_creator = OutputDirManager(config.output_dir)
-        txt_output_dir, cnr_dir, wtcnr_dir, cdt_dir = output_creator.create_output_dir()
+        metadata_manager.update_completed_steps("step1")
 
-        summary_exist = glob.glob(os.path.join(config.output_dir, "cluster_summary","*barcode_grouping_info.csv"))
-        if len(summary_exist) == len(files_exist):
-            logger.info("Step 2 (ParallelClusterProcessor/Merger) is done.")
+        # Step 2 ...
+        logger.info("Starting Step 2 (ParallelClusterProcessor/Merger)...")
+
+        output_creator = OutputDirManager(config.output_dir)
+        txt_output_dir, cnr_dir, wtcnr_dir, cdt_dir,_,_ = output_creator.create_output_dir()
+
+        summary_exist = glob.glob(os.path.join(
+            config.output_dir, 
+            "cluster_summary",
+            "*barcode_grouping_info.csv"
+        ))
 
         if not summary_exist:
             # Process clusters in parallel
             parallel_processor = ParallelClusterProcessor(config=config)
             parallel_processor.parallel_cluster_merger()
             output_creator.move_csvs_to_summary() # move merger summary to cluster_summary dir
+        else:
+            logger.info("Step 2 already completed. ")
 
-        logger.info("Starting Step 3: Generate cnr file for each barcode ...")
+        metadata_manager.update_completed_steps("step2")
+
+        # Step 3 ...
+        logger.info("Starting Step 3:  "
+                "Generate cnr file for each barcode ...")
+
         cnr_exist = glob.glob(os.path.join(cnr_dir, "*.cnr"))
+
         if cnr_exist:
             logger.info("cnr files are generated.")
             logger.warning(f"If you want to regenerate cnr files, make sure {cnr_dir} is empty.")
@@ -174,7 +343,9 @@ def main():
             )
 
             txt_files = glob.glob(os.path.join(txt_output_dir, "*.txt"))
+
             logger.info(f"Running import-rna on {len(txt_files)} files...")
+
             full_cmd = (
                 f"ulimit -s unlimited && cd {txt_output_dir} && "
                 f'python -c "{patch_code}" import-rna '
@@ -183,21 +354,32 @@ def main():
                 f"-o {cnr_dir}/output.txt "
                 f"$(ls *.txt)"  # Command substitution to pass all files at once
             )
-            subprocess.run(full_cmd, shell=True, check=True)
+            subprocess.run(
+                full_cmd, 
+                shell=True, 
+                check=True
+            )
+        else:
+            logger.info("cnr files already exist.")
 
+        metadata_manager.update_completed_steps("step3")
 
+        # Step 4 ...
         logger.info("Starting step 4: weighted_median calculation...")
+
         wtcnr_exist = glob.glob(os.path.join(wtcnr_dir, "*.cnr"))
 
-        if wtcnr_exist:
-            logger.info("weighted cnr files are generated.")
-            logger.warning(f"If you want to regenerate weighted cnr files, make sure {wtcnr_dir} is empty.")
-        else:
-            #orchestrator = WorkflowOrchestrator(output_dir, cores)
+        if not wtcnr_exist:
             orchestrator = WorkflowOrchestrator(config=config)
             orchestrator.run_parallel_workflow()
+        else:
+            logger.info("Weighted cnr files already exist.")
 
+        metadata_manager.update_completed_steps("step4")
+
+        # Step 5 ...
         logger.info("Starting step 5: export cdt file...")
+
         cnr_files_list = glob.glob(os.path.join(wtcnr_dir, "*.cnr"))
 
         export_shell_cmd = (
@@ -207,23 +389,36 @@ def main():
         )
 
         logger.info(f"Exporting CDT for {len(cnr_files_list)} files...")
+        
         try:
-            subprocess.run(export_shell_cmd, shell=True, check=True)
+            subprocess.run(
+                export_shell_cmd, 
+                shell=True, 
+                check=True
+            )
             logger.info("Export successful.")
+
         except subprocess.CalledProcessError as e:
-            logger.info(f"Error during export: {e}")
+            logger.error(f"CDT export failed: {e}")
 
+        metadata_manager.update_completed_steps("step5")
 
+        # Step 6 ...
         logger.info("Starting step 6: calling CNV...")
-        # Instantiate workflow
-        #workflow = CNVCallPlotWorkflow(graph_based_csv, annotate_csv, output_dir)
+
         workflow = CNVCallPlotWorkflow(config=config)
         workflow.cnv_workflow(
             ncluster=config.ncluster,
             bulk_csv=config.bulk_csv,
-            pmtimes=config.pmtimes
-        )
+            pmtimes=config.pmtimes,
+            distance_metric=config.distance_metric,
+            linkage_method=config.linkage_method,
+            )
 
+        metadata_manager.update_completed_steps("step6")
+# =======================
+# call-cnv only
+# =======================
     elif args.command == "call-cnv":
         logger.info("Re-running Step 6: calling CNV ...")
         InputValidator(config).validate_call_cnv()
@@ -231,8 +426,11 @@ def main():
         workflow.cnv_workflow(
             ncluster=config.ncluster,
             bulk_csv=config.bulk_csv,
-            pmtimes=config.pmtimes
+            pmtimes=config.pmtimes,
+            distance_metric=config.distance_metric,
+            linkage_method=config.linkage_method,
         ) 
+        metadata_manager.update_completed_steps("step6")
 
 if __name__ == "__main__":
     main()

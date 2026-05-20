@@ -3,6 +3,10 @@ from importlib import resources
 
 logging.basicConfig(level=logging.INFO)
 
+"""  
+Config is runtime parameters only
+"""
+
 
 class BaseConfig:
     """Base configuration shared across all pipeline steps."""
@@ -60,13 +64,36 @@ class MergerConfig(InitialStepConfig):
 class CNVAnalysisConfig(MergerConfig):
     """Configuration for step 6: CNV calling and visualization."""
 
-    def __init__(self, annotate_csv=None, bulk_csv=None,
-                 pmtimes=5, ncluster=6, distance_metric='euclidean',
-                 linkage_method='ward', **kwargs):
+    def __init__(self, 
+                canonical_inputs=None,
+                metadata_manager=None,
+                annotate_csv=None, 
+                bulk_csv=None,
+                pmtimes=5, 
+                ncluster=6, 
+                distance_metric='euclidean',
+                linkage_method='ward', 
+                **kwargs):
         super().__init__(**kwargs)
+
+        self.metadata_manager = metadata_manager
+
+        # canonical inputs are NOW explicit
+        self.clusterf = None
+        self.spatial_file = None
+        self.exp_h5 = None
+
+        if canonical_inputs:
+            self.clusterf = canonical_inputs.get("cluster_file")
+            self.spatial_file = canonical_inputs.get("spatial_file")
+            self.exp_h5 = canonical_inputs.get("exp_h5")
+
+
         self.annotate_csv = annotate_csv
         self.bulk_csv = bulk_csv
+
         self.pmtimes = pmtimes
         self.ncluster = ncluster
         self.distance_metric = distance_metric
         self.linkage_method = linkage_method
+

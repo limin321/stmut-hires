@@ -10,15 +10,15 @@ import logging
 """ 6. Main Processor(Orchestrator) """
 class ClusterExpressionProcessor:
     """Orchestrate the cluster expression processing workflow """
-    def __init__(self, config, dry_run=False):
+    def __init__(self, config):
         self.config = config
-        self.dry_run = dry_run
+        self.dry_run = config.dry_run
         self.logger = logging.getLogger(__name__)
         self.cluster_reader = ClusterReader()
         self.h5_reader = H5MatrixReader(config.exp_h5)
         self.filter = FilterOutCrappyData(config)
         self.matrix_builder = ExpressionMatrixBuilder()
-        self.gene_writer = GeneDataWriter(config.output_dir, dry_run=dry_run)
+        self.gene_writer = GeneDataWriter(config.output_dir, dry_run=config.dry_run)
         self.qc_plot = QCplot(config.output_dir)
 
     def process(self):

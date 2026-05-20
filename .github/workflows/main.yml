@@ -2,10 +2,15 @@ name: CI/CD Pipeline
 
 on:
   push:
-    branches: [ "master", "ubuntu-claude-work" ]
+    branches: [ "master", "ubuntu-claude-work", "atera" ]
   pull_request:
     branches: [ "master" ]
   workflow_dispatch: # This adds a "Run workflow" button in the Actions tab
+
+# Prevent duplicate runs on same branch
+concurrency:
+  group: ci-cd-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   # Stage 1: Continuous Integration (Testing)
@@ -26,6 +31,7 @@ jobs:
             environment-file: environment.yml
             environment-name: stmut-hires
             cache-environment: true
+            cache-downloads: true
 
       #2 Fix Libray Link
       - name: Fix Library Link
@@ -58,9 +64,12 @@ jobs:
   docker-build:
     needs: test
     runs-on: ubuntu-latest
-    # Only builds the image when code is pushed directly to master
-    # if: github.event_name == 'push' && github.ref == 'refs/heads/master'
-    if: github.event_name == 'push' 
+    if: github.event_name == 'push' && github.ref == 'refs/heads/atera'
+    
+    permissions:
+      contents: read
+      packages: write
+    
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -71,13 +80,30 @@ jobs:
         with:
             username: ${{ secrets.DOCKERHUB_USERNAME }}
             password: ${{ secrets.DOCKERHUB_TOKEN }}
+      
+      # Setup Docker Buildx
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Generate Docker metadata
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ secrets.DOCKERHUB_USERNAME }}/stmut-hires
+          tags: |
+            type=raw,value=atera-latest
+            type=sha,prefix=atera-sha-
+      
       # Build and push the image
       - name: Build and Push Docker image
         uses: docker/build-push-action@v6
         with:
             context: .
             push: true
-            tags: |
-              ${{ secrets.DOCKERHUB_USERNAME }}/stmut-hires:latest
-              ${{ secrets.DOCKERHUB_USERNAME }}/stmut-hires:${{ github.ref_name }}
-              ${{ secrets.DOCKERHUB_USERNAME }}/stmut-hires:sha-${{ github.sha }}
+            tags: ${{ steps.meta.outputs.tags }}
+            labels: ${{ steps.meta.outputs.labels }}
+
+            # Faster rebuilds
+            cache-from: type=gha
+            cache-to: type=gha,mode=max

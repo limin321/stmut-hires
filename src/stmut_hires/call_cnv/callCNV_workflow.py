@@ -86,6 +86,7 @@ class CNVCallPlotWorkflow:
         # Ensure output directories exist
         os.makedirs(self.output_dir, exist_ok=True)
         os.makedirs(os.path.join(self.output_dir, "tables"), exist_ok=True)
+        os.makedirs(os.path.join(self.output_dir, "figures"), exist_ok=True)
 
     def call_cnv(self):
         """Call CNV and save merged summary."""

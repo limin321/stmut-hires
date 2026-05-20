@@ -40,7 +40,7 @@ class OutputCleaner:
         self.keep = set(keep) if keep is not None else self.DEFAULT_KEEP
         self.verbose = verbose
  
-    def clean(self, enabled: bool = True) -> None:
+    def clean(self) -> None:
         """
         Run the cleaning step.
  
@@ -50,10 +50,6 @@ class OutputCleaner:
             When False, returns immediately without touching anything.
             Pass args.clean directly from cli_parser.py.
         """
-        if not enabled:
-            if self.verbose:
-                print("[OutputCleaner] Cleaning skipped.")
-            return
  
         if not self.output_dir.exists():
             raise FileNotFoundError(f"Output directory not found: {self.output_dir}")

@@ -32,7 +32,7 @@ class OutputDirManager:
 
         self.cluster_summary = f"{self.output_dir}/cluster_summary"
         os.makedirs(self.cluster_summary, exist_ok=True)
-        return self.txt_output_dir, self.cnr_dir, self.wtcnr_dir, self.cdt_dir 
+        return self.txt_output_dir, self.cnr_dir, self.wtcnr_dir, self.cdt_dir,self.figures_dir,self.cluster_summary
 
     def move_csvs_to_summary(self):
         """Moves all CSV files from txt directory to cluster_summary folder"""

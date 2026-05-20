@@ -9,93 +9,322 @@ BULK_CNV_REQUIRED_COLS = {"arms", "gainloss"}
 
 
 class InputValidator:
-    """Validates presence and correctness of all pipeline input files."""
+    """
+    Validate pipeline runtime state, inputs, metadata,
+    and required outputs for downstream execution.
+    """
 
     def __init__(self, config):
         self.config = config
         self.logger = logging.getLogger(__name__)
 
+    # ==========================================================
+    # Public APIs
+    # ==========================================================
     def validate_run(self):
-        """Validate all raw input files for the full 'run' pipeline."""
+        """Validate full pipeline execution requirements."""
+        self.logger.info(
+            "Validating full pipeline inputs..."            
+        )
         self._ensure_output_dir()
-        self._validate_step1()
-        self._validate_step2()
-        self._validate_step6()
+        if not self.config.dry_run:
+            self._validate_canonical_inputs()
+            
+        self._validate_pipeline_parameters()
+        self._validate_cnv_inputs()
+        self.logger.info(
+            "Full pipeline validation completed successfully."
+        )
+
 
     def validate_call_cnv(self):
-        """Validate inputs for the 'call-cnv' subcommand."""
-        self._ensure_output_dir()
-        self._validate_step6()
-
-    def _ensure_output_dir(self):
-        if not self.config.dry_run:
-            os.makedirs(self.config.output_dir, exist_ok=True)
-            self.logger.info(f"Created output dir: {self.config.output_dir}")
-        else:
-            self.logger.info(f"[DRY-RUN] Would create output dir: {self.config.output_dir}")
-
-    def _validate_step1(self):
-        self.logger.info("Validating step 1 input files...")
-        if not self.config.clusterf:
-            raise ValueError("--cluster_file is required.")
-        if not os.path.exists(self.config.clusterf):
-            raise FileNotFoundError(f"Cluster file NOT FOUND: {self.config.clusterf}")
-
-        if not self.config.exp_h5:
-            raise ValueError("--exp_h5 is required.")
-        if not os.path.exists(self.config.exp_h5):
-            raise FileNotFoundError(f"H5 file NOT FOUND: {self.config.exp_h5}")
-
-        self.logger.info("Step 1 inputs are valid.")
-
-    def _validate_step2(self):
-        self.logger.info("Validating Step 2 specific inputs...")
-        if not self.config.spatial_file:
-            raise ValueError("--spatial_file is required.")
-        if not os.path.exists(self.config.spatial_file):
-            raise FileNotFoundError(f"Spatial input file not found: {self.config.spatial_file}")
-        if not isinstance(self.config.cutoff, int):
-            raise TypeError(f"cutoff must be an integer, got: {type(self.config.cutoff)}")
-        if not isinstance(self.config.window, int):
-            raise TypeError(f"window must be an integer, got: {type(self.config.window)}")
-        self.logger.info("Step 2 inputs are valid.")
-
-    def _validate_step6(self):
-        # annotate.csv is required
-        if not self.config.annotate_csv:
-            raise ValueError("--annotate_file is required.")
-        if not os.path.exists(self.config.annotate_csv):
-            raise FileNotFoundError(f"Annotation file NOT FOUND: {self.config.annotate_csv}")
-        self._check_csv_columns(
-            self.config.annotate_csv,
-            ANNOTATE_REQUIRED_COLS,
-            "--annotate_file"
+        """Validate Step 6 standalone execution requirements."""
+        self._validate_metadata()
+        self._validate_previous_pipeline_outputs()
+        self._validate_cnv_inputs()
+        self._validate_canonical_inputs()
+        self.logger.info(
+            "call-cnv validation completed successfully."
         )
-        self.logger.info(f"Annotation file validated: {self.config.annotate_csv}")
 
-        # bulkCNV.csv is optional — only validate if provided
-        if self.config.bulk_csv:
-            if not os.path.exists(self.config.bulk_csv):
-                raise FileNotFoundError(f"Bulk CNV file NOT FOUND: {self.config.bulk_csv}")
-            self._check_csv_columns(
-                self.config.bulk_csv,
-                BULK_CNV_REQUIRED_COLS,
-                "--bulkCNV_file"
+    # ==========================================================
+    # Output directory
+    # ==========================================================
+    def _ensure_output_dir(self):
+        if self.config.dry_run:
+            self.logger.info(
+                f"[DRY-RUN] Would create output dir: "
+                f"{self.config.output_dir}"
             )
-            self.logger.info(f"Bulk CNV file validated: {self.config.bulk_csv}")
-        else:
-            self.logger.info("No bulk CNV file provided; proceeding without bulkCNV info.")
 
-        wtcnr_dir = os.path.join(self.config.output_dir, "wtcnr")
-        if not os.path.exists(wtcnr_dir):
-            self.logger.warning(f"Weighted CNR directory {wtcnr_dir} not found. Step 6 may fail.")
+            return
 
-    def _check_csv_columns(self, filepath, required_cols, arg_name):
-        """Read only the header row and verify required column names are present."""
-        actual_cols = set(pd.read_csv(filepath, nrows=0).columns)
-        missing = required_cols - actual_cols
-        if missing:
+        os.makedirs(
+            self.config.output_dir, 
+            exist_ok=True
+        )
+
+        self.logger.info(
+            f"Output directory ready: "
+            f"{self.config.output_dir}"
+        )
+
+    # ==========================================================
+    # Metadata validation
+    # ==========================================================
+    def _validate_metadata(self):
+        """ 
+        Ensure metadata.json exists for downstream execution.
+        """    
+        if not self.config.metadata_manager:
             raise ValueError(
-                f"{arg_name} is missing required column(s): {missing}. "
-                f"Expected columns: {required_cols}, got: {actual_cols}"
+                "metadata_manager is not configured."
             )
+        metadata_path = (
+            self.config.metadata_manager.metadata_path
+        )
+
+        if not os.path.exists(metadata_path):
+            raise FileNotFoundError(
+                f"Pipeline metadata file not found."
+                f"{metadata_path}"
+            )
+
+        self.logger.info(
+            f"Metadata validated: {metadata_path}"
+        )
+
+    # ==========================================================
+    # Canonical pipeline inputs
+    # ==========================================================
+    def _validate_canonical_inputs(self):
+        """ 
+        Validate canonical runtime inputs resolved from metadata.json
+        """  
+        self.logger.info(
+            "Validating canonical pipeline inputs ..."
+        )
+
+        self._validate_required_file(
+            filepath=self.config.clusterf,
+            arg_name="cluster_file"
+        )
+
+        self._validate_required_file(
+            filepath=self.config.exp_h5,
+            arg_name="exp_h5"
+        )
+
+        self._validate_required_file(
+            filepath=self.config.spatial_file,
+            arg_name="spatial_file"
+        )
+
+        self._validate_required_file(filepath=self.config.bed_file, arg_name="bed_file")
+        self._validate_required_file(filepath=self.config.gene_info, arg_name="gene_info")
+        self._validate_required_file(filepath=self.config.corr_file, arg_name="corr_file")
+        self.logger.info(
+            "Canonical inputs validated successfully."
+        )
+
+    # ==========================================================
+    # Pipeline runtime parameters
+    # ==========================================================
+    def _validate_pipeline_parameters(self):
+
+        self.logger.info(
+            "Validating runtime parameters..."
+        )
+
+        self._validate_type(
+            self.config.cutoff,
+            int,
+            "cutoff"
+        )
+
+        self._validate_type(
+            self.config.window,
+            int,
+            "window"
+        )
+
+        self._validate_type(
+            self.config.cores,
+            int,
+            "cores"
+        )
+
+        if self.config.num_processes is not None:
+
+            self._validate_type(
+                self.config.num_processes,
+                int,
+                "num_processes"
+            )
+
+        self.logger.info(
+            "Runtime parameters validated successfully."
+        )    
+
+    # ==========================================================
+    # CNV Step inputs
+    # ==========================================================
+    def _validate_cnv_inputs(self):
+
+        self.logger.info(
+            "Validating CNV step inputs..."
+        )
+
+        # ------------------------------------------------------
+        # annotate_file (required)
+        # ------------------------------------------------------
+        self._validate_required_file(
+            filepath=self.config.annotate_csv,
+            arg_name="annotate_file"
+        )
+
+        self._check_csv_columns(
+            filepath=self.config.annotate_csv,
+            required_cols=ANNOTATE_REQUIRED_COLS,
+            arg_name="annotate_file"
+        )
+
+        self.logger.info(
+            f"Annotation file validated: "
+            f"{self.config.annotate_csv}"
+        )
+
+        # ------------------------------------------------------
+        # bulkCNV_file (optional)
+        # ------------------------------------------------------
+        if self.config.bulk_csv:
+
+            self._validate_required_file(
+                filepath=self.config.bulk_csv,
+                arg_name="bulkCNV_file"
+            )
+
+            self._check_csv_columns(
+                filepath=self.config.bulk_csv,
+                required_cols=BULK_CNV_REQUIRED_COLS,
+                arg_name="bulkCNV_file"
+            )
+
+            self.logger.info(
+                f"Bulk CNV file validated: "
+                f"{self.config.bulk_csv}"
+            )
+
+        else:
+
+            self.logger.info(
+                "No bulk CNV file provided."
+            )
+
+    # ==========================================================
+    # Previous pipeline outputs
+    # ==========================================================
+
+    def _validate_previous_pipeline_outputs(self):
+        """
+        Validate outputs required for re-running Step 6.
+        """
+
+        wtcnr_dir = os.path.join(
+            self.config.output_dir,
+            "wtcnr"
+        )
+
+        if not os.path.exists(wtcnr_dir):
+
+            raise FileNotFoundError(
+                f"Required wtcnr directory not found: "
+                f"{wtcnr_dir}. "
+                f"Please run the full pipeline first."
+            )
+
+        cnr_files = [
+            f for f in os.listdir(wtcnr_dir)
+            if f.endswith(".cnr")
+        ]
+
+        if not cnr_files:
+
+            raise FileNotFoundError(
+                f"No .cnr files found in: "
+                f"{wtcnr_dir}"
+            )
+
+        self.logger.info(
+            f"Validated {len(cnr_files)} "
+            f"weighted CNR files."
+        )
+
+    # ==========================================================
+    # Generic reusable validators
+    # ==========================================================
+
+    def _validate_required_file(
+        self,
+        filepath,
+        arg_name
+    ):
+
+        if not filepath:
+
+            raise ValueError(
+                f"{arg_name} is required."
+            )
+
+        if not os.path.exists(filepath):
+
+            raise FileNotFoundError(
+                f"{arg_name} not found: {filepath}"
+            )
+
+    def _validate_type(
+        self,
+        value,
+        expected_type,
+        param_name
+    ):
+
+        if not isinstance(value, expected_type):
+
+            raise TypeError(
+                f"{param_name} must be "
+                f"{expected_type}, got {type(value)}"
+            )
+
+    def _check_csv_columns(
+        self,
+        filepath,
+        required_cols,
+        arg_name
+    ):
+        """
+        Read only CSV header and validate columns.
+        """
+
+        actual_cols = set(
+            pd.read_csv(filepath, nrows=0).columns
+        )
+
+        missing = required_cols - actual_cols
+
+        if missing:
+
+            raise ValueError(
+                f"{arg_name} missing required columns: "
+                f"{missing}. "
+                f"Expected: {required_cols}. "
+                f"Observed: {actual_cols}"
+            )
+
+
+
+
+
+
+
+

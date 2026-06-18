@@ -2,7 +2,7 @@ name: CI/CD Pipeline
 
 on:
   push:
-    branches: [ "master", "ubuntu-claude-work", "atera" ]
+    branches: [ "master" ]
   pull_request:
     branches: [ "master" ]
   workflow_dispatch: # This adds a "Run workflow" button in the Actions tab
@@ -64,7 +64,7 @@ jobs:
   docker-build:
     needs: test
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && github.ref == 'refs/heads/atera'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
     
     permissions:
       contents: read
@@ -92,8 +92,8 @@ jobs:
         with:
           images: ${{ secrets.DOCKERHUB_USERNAME }}/stmut-hires
           tags: |
-            type=raw,value=atera-latest
-            type=sha,prefix=atera-sha-
+            type=raw,value=latest
+            type=sha,prefix=sha-
       
       # Build and push the image
       - name: Build and Push Docker image

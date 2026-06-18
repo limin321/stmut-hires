@@ -9,7 +9,7 @@
   - Next: add a sub-command to only run step3  by taking X-chr gain or loss.
   - Files: 
 
-- [ ] **Plot grouping statistic as standard outpot**
+- [ ] **Plot grouping statistic as standard output**
   - Status: 100% complete
   - Issue: Missing statistic of how many bins to form a new bin
   - Next: Generate a histogram to visualize grouping statistics; grouped_spotSummary.csv (.1 not -1 in barcode); output --caseCNV_summ.csv
@@ -17,10 +17,11 @@
 
 
 ### Planned
-- [ ] **Merge with main pipeline**
+- [ ] **Take Stereo-seq data**
   - Priority: High
-  - Description: Test before create Docker image for easy deployment.
-  - Timeline: Dec 2025
+  - Description: add a new class to infer CNV from Stereo-seq.
+  - `local`-level merge statistic file/histogram plot.
+  - Timeline: Dec 2026
 
 - [ ] **Configuration file support**
   - Priority: Low

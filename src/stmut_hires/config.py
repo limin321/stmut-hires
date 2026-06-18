@@ -73,6 +73,8 @@ class CNVAnalysisConfig(MergerConfig):
                 ncluster=6, 
                 distance_metric='euclidean',
                 linkage_method='ward', 
+                smooth_method="arm",
+                target_weight=25,
                 **kwargs):
         super().__init__(**kwargs)
 
@@ -96,4 +98,7 @@ class CNVAnalysisConfig(MergerConfig):
         self.ncluster = ncluster
         self.distance_metric = distance_metric
         self.linkage_method = linkage_method
+        self.smooth_method = smooth_method
+        self.target_weight = target_weight
+
 

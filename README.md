@@ -1,7 +1,9 @@
 # stmut-hires
 
 ## Description
-A command-line tool for CNV analysis in high-resolution spatial transcriptomics. It is the upgraded version of [stmut](https://github.com/limin321/stmut) to handle high resolution spatial transcriptomics data (VisiumHD, StereoSeq)
+A command-line tool for CNV (Copy Number Variation) analysis in high-resolution spatial transcriptomics. It is the upgraded version of [stmut](https://github.com/limin321/stmut), built to handle high-resolution spatial transcriptomics data (VisiumHD, Atera).
+
+Given a gene-expression matrix, cluster assignments with tumor/normal annotations, bins/spots spatial location, [optional] bulk-DNA reference, and produces clustered CNV heatmaps and summary tables.
 
 ## Getting Started
 ### Performance Benchmarks
@@ -63,7 +65,7 @@ If successful, you will see the CNV Analysis Pipeline help message.
 We also provided a Dockerfile. You can create your own docker image while inside `stmut-hires` directory.
 `docker build -t stmut-hires:v0.1.0 .`
 or pull the docker image from Docker Hub [stmut-hires](https://hub.docker.com/r/limin321/stmut-hires) by
-`docker pull limin321/stmut-hires:v0.1.0`
+`docker pull limin321/stmut-hires:v0.1.0`  Make sure you pull the latest version.
 
 Here is an example of running  stmut-hires using docker container:
 ```
@@ -79,11 +81,12 @@ docker run --rm \
     -v ${indir}:/data/input \
     -v ${outdir}:/data/outs \
     stmut-hires:v0.1.0 run \
+    --input_mode visiumhd \
     --exp_h5 /data/input/filtered_feature_bc_matrix.h5 \
     --cluster_file /data/input/Graph-Based.csv \
     --spatial_file /data/input/spatial/tissue_positions.parquet \
     --output_dir /data/outs \
-    --manul_cutoff 50 \
+    --manual_cutoff 50 \
     --cutoff 3000 \
     --num_processes 10 \
     --annotate_file /data/input/annotate.csv \
@@ -91,7 +94,6 @@ docker run --rm \
     --cores 10 \
     --pmtimes 50 \
     --ncluster 6
-
 
 echo "Finished"
 ```
@@ -101,6 +103,7 @@ echo "Finished"
 ### Usage example:
 #### 1. Prepare inputs files
 
+VisiumHD inputs:
 |   inputs                      | Note                            |
 |-------------------------------|---------------------------------|
 | filtered_feature_bc_matrix.h5 | SpaceRanger output              |
@@ -110,7 +113,20 @@ echo "Finished"
 | annotate.csv                  | cluster tumor/normal annotation |
 | bulkCNV.csv  (Optional)       | bulk CNV info                   |
 
-annotate.csv -- A two-column tumor/normal annotation csv file. (Case sensitive, 'cluster' NOT 'Cluster' or 'CLUSTER')
+
+---------------------------------------------------------------- 
+Atera inputs:
+|   inputs                      | Note                            |
+|-------------------------------|---------------------------------|
+| cell_feature_matrix.h5        | SpaceRanger output              |
+| cells.parquet                 | SpaceRanger output              |
+| analysis.zarr.zip             | SpaceRanger output      |
+| outdir                        | output_dir path                 |
+| annotate.csv                  | cluster tumor/normal annotation |
+| bulkCNV.csv  (Optional)       | bulk CNV info                   |
+
+Note:  
+annotate.csv -- A two-column tumor/normal annotation csv file.
 ```
 cluster,annotate
 cluster 1,tumor
@@ -133,92 +149,120 @@ arms,gainloss
 For other inputs, please refer to the `--help` message
 
 #### 2. Running full pipeline
+##### Example 1: VisiumHD Data
 ```
-# Define paths
+#! /bin/bash
+
+set -e
+
 INDIR="xx/xx/inputs"
 OUTDIR="xx/xx/outs"
 
-stmut-hires run \
-    --exp_h5 ${INDIR}/filtered_feature_bc_matrix.h5 \
-    --cluster_file ${INDIR}/Graph-Based.csv \
-    --spatial_file ${INDIR}/spatial/tissue_positions.parquet \
-    --output_dir ${OUTDIR} \
-    --cutoff 3000 \
-    --num_processes 10 \
-    --annotate_file ${INDIR}/annotate.csv \
-    --bulkCNV_file ${INDIR}/bulkCNV.csv \
-    --manul_cutoff 50 \
-    --cores 10 \
-    --pmtimes 50 \
-    --ncluster 6
+stmut-hires run   \
+  --input_mode visiumhd \
+  --manual_cutoff 40 \
+  --exp_h5 ${INDIR}/filtered_feature_bc_matrix.h5   \
+  --cluster_file ${INDIR}/Graph-Based.csv   \
+  --spatial_file ${INDIR}/spatial/tissue_positions.parquet   \
+  --annotate_file ${INDIR}/annotate.csv   \
+  --bulkCNV_file ${INDIR}/bulkCNV.csv   \
+  --output_dir ${OUTDIR} \
+  --cutoff 3000 \
+  --num_processes 10 \
+  --cores 10 \
+  --ncluster 6 \
+  --pmtimes 50
 
 ```
+
+##### Example 2: Atera Data 
+```
+#! /bin/bash
+
+set -e
+
+OUTDIR="xx/atera/outs"
+INDIR="xx/Atera/breast_cancer"
+
+stmut-hires run   \
+  --input_mode atera \
+  --exp_h5 ${INDIR}/stmut_input/cell_feature_matrix.h5   \
+  --cells_parquet ${INDIR}/cells.parquet   \
+  --analysis_zarr_zip ${INDIR}/analysis.zarr.zip  \
+  --annotate_file ${INDIR}/stmut_input/annotate.csv   \
+  --output_dir ${OUTDIR} \
+  --smooth_method local \
+  --target_weight 25 \
+  --manual_cutoff 40 \
+  --cutoff 3000 \
+  --num_processes 10 \
+  --cores 10 \
+  --ncluster 6
+
+```
+
 
 #### Expected output structure
-A successful run will include all the following folders. There are too many files in txt, cnr, wtcnr folder, which are not shown here for better demonstration.
+A successful run will include all the following folders. There are too many interediate files, such as in txt, cnr, wtcnr folder, which are not shown here for better visualization.  
+The complete output expects 9 directories. However, only `figures` and `tables` folder are the final output for biology interpretation. The rest are intermediat file. The output can be cleaned by running `stmut-hires clean out_path`
+
 ```
-(base) [stmut_hires_test_proj]$ tree -L 2 outs
-outs
+(base) [bd17_out]$ tree -L 1 .
+.
 ├── cdt
-│   └── grpWt.cdt
 ├── cluster_exp
-│   ├── Cluster1.parquet
-│   ├── Cluster2.parquet
-│   ├── Cluster3.parquet
-│   ├── Cluster4.parquet
-│   ├── Cluster5.parquet
-│   ├── Cluster6.parquet
-│   ├── Cluster7.parquet
-│   ├── Cluster8.parquet
-│   ├── Cluster9.parquet
-│   └── ensembl.csv
 ├── cluster_summary
-│   ├── Cluster1_barcode_grouping_info.csv
-│   ├── Cluster2_barcode_grouping_info.csv
-│   ├── Cluster3_barcode_grouping_info.csv
-│   ├── Cluster4_barcode_grouping_info.csv
-│   ├── Cluster5_barcode_grouping_info.csv
-│   ├── Cluster6_barcode_grouping_info.csv
-│   ├── Cluster7_barcode_grouping_info.csv
-│   ├── Cluster8_barcode_grouping_info.csv
-│   └── Cluster9_barcode_grouping_info.csv
 ├── cnr
 ├── figures
-│   ├── barcodes_counts_histogram.pdf
-│   ├── CNVs_OrganizedByGEcluster_UMIcount.pdf
-│   ├── CNVs_RankedBySimilarityToDNA_CNVscoreHistogram.pdf
-│   ├── CNVs_RankedBySimilarityToDNA_QQplot.pdf
-│   └── unrooted_CNVs_clustered_heatmap_class_6clusters.pdf
 ├── tables
-|   ├── caseCNVScore.parquet
-|   ├── cluster_barcodes_summary.csv
-|   ├── CNVs_OrganizedByGEcluster_UMIcount.cdt
-|   ├── CNVs_RankedBySimilarityToDNA.cdt.parquet
-|   ├── CNVs_RankedBySimilarityToDNA_CNVscoreHistogram.csv
-|   ├── CNVs_RankedbySimilaritytoDNA_Quintiles4Loupe.csv
-|   └── permut_CNVscores.parquet
 ├── txt
 └── wtcnr
+
+
+# Here is what to expect in figures and tables folders:
+(base) [ bd17_out]$ tree figures/
+figures/
+├── barcodes_counts_histogram.pdf
+├── CNVs_OrganizedByGEcluster_UMIcount.pdf
+├── CNVs_RankedBySimilarityToDNA_CNVscoreHistogram.pdf
+├── CNVs_RankedBySimilarityToDNA_QQplot.pdf
+├── gene_counts_before_after_filtering.png
+└── unrooted_CNVs_clustered_heatmap_class_6clusters.pdf
+
+1 directory, 6 files
+(base) [ bd17_out]$ tree tables/
+tables/
+├── caseCNVScore.parquet
+├── cluster_barcodes_summary.csv
+├── CNVs_OrganizedByGEcluster_UMIcount.cdt
+├── CNVs_RankedBySimilarityToDNA.cdt.parquet
+├── CNVs_RankedBySimilarityToDNA_CNVscoreHistogram.csv
+├── CNVs_RankedbySimilaritytoDNA_Quintiles4Loupe.csv
+└── permut_CNVscores.parquet
+
+1 directory, 7 files  
+Note: `**_RankedBySimilarityToDNA_**` won't be generated unless bulk CNV information is included in the pipeline.
 ```
 
 #### 3. Rerun CNV calling step
 It is typically difficult to infer copy number alterations on the X-chr with gene expression data. One copy of the X-chr is silenced via X-inactivation. If the inactive copy of X is subjected to a CNA, it would not show up in the gene expression data. If the active copy is gained, better to include X-chr just to rerun the RankedBySimilarity analysis.
 
-Assuming you have run the full pipeline, just need to modify your "bulkCNV.csv" file, and rerun the following script.
-**Note**, the outputs inside the `figures` and `tables` directory from full pipeline will overwritten. Please make your own copy if you want to keep the full pipeline outputs.
+Assuming you have run the full pipeline, just need to modify your "bulkCNV.csv" file, and rerun the following script.  
+**Note**, the outputs inside the `figures` and `tables` directory from full pipeline will overwritten. Please make your keep a copy if you want to keep the full pipeline outputs.
 
 ```
 # Define paths
 INDIR="xx/xx/inputs"
 OUTDIR="xx/xx/outs"
 
+dir1="/stomics_data/liminData/Visium/stmut_python/BD17_bin8_inputs"
 stmut-hires call-cnv \
-    --cluster_file ${INDIR}/Graph-Based.csv \
-    --output_dir ${OUTDIR} \
-    --annotate_file ${INDIR}/annotate.csv \
-    --bulkCNV_file ${INDIR}/bulkCNV.csv \
-    --pmtimes 50 \
-    --ncluster 6
+  --annotate_file ${INDIR}/annotate.csv   \
+  --bulkCNV_file ${INDIR}/bulkCNV.csv   \
+  --output_dir ${OUTDIR} \
+  --ncluster 6 \
+  --pmtimes 50
+
 ```
 
 #### 4. Clean output
@@ -236,54 +280,54 @@ options:
 
 
 
-### Help
+### Command Reference (--help)
 ```
-usage: stmut-hires [-h] {run,call-cnv,clean} ...
-
-CNV Analysis Pipeline.
-
-positional arguments:
-  {run,call-cnv,clean}  Available commands
-    run                 Run full pipeline.
-    call-cnv            Run Step 6: calling CNV..only
-    clean               Clean intermediate output folders, keeping only figures/ and tables/.
-
-options:
-  -h, --help            show this help message and exit
-(stmut-filter) [lchen@localhost stmut-hires]$ stmut-hires run --help
-usage: stmut-hires run [-h] --output_dir OUTPUT_DIR --cluster_file CLUSTER_FILE [--dry_run] --exp_h5 EXP_H5 --spatial_file
-                       SPATIAL_FILE [--manual_cutoff MANUAL_CUTOFF] [--num_processes NUM_PROCESSES] [--cutoff CUTOFF]
-                       [--window WINDOW] [--cores CORES] [--bw_method BW_METHOD] [--annotate_file ANNOTATE_FILE]
-                       [--bulkCNV_file BULKCNV_FILE] [--pmtimes PMTIMES] [--ncluster NCLUSTER] [--distance_metric DISTANCE_METRIC]
-                       [--linkage_method LINKAGE_METHOD]
+(stmut-hires) [bd17_out]$ stmut-hires run --help
+usage: stmut-hires run [-h] --output_dir OUTPUT_DIR [--dry_run] --input_mode {visiumhd,atera} [--exp_h5 EXP_H5]
+                       [--spatial_file SPATIAL_FILE] [--cluster_file CLUSTER_FILE] [--cells_parquet CELLS_PARQUET]
+                       [--analysis_zarr_zip ANALYSIS_ZARR_ZIP] [--manual_cutoff MANUAL_CUTOFF]
+                       [--num_processes NUM_PROCESSES] [--cutoff CUTOFF] [--window WINDOW] [--cores CORES]
+                       [--bw_method BW_METHOD] [--smooth_method {arm,local}] [--target_weight TARGET_WEIGHT]
+                       --annotate_file ANNOTATE_FILE [--bulkCNV_file BULKCNV_FILE] [--pmtimes PMTIMES]
+                       [--ncluster NCLUSTER] [--distance_metric DISTANCE_METRIC] [--linkage_method LINKAGE_METHOD]
 
 options:
   -h, --help            show this help message and exit
   --output_dir OUTPUT_DIR
-                        Output directory.
-  --cluster_file CLUSTER_FILE
-                        Barcodes cluster info.(csv);Graph-based.csv downloaded from Loupe Browser.
-  --dry_run             Dry run mode
-  --exp_h5 EXP_H5       Gene expression matrix (h5)
+                        Pipeline output directory.
+  --dry_run             Dry run mode. Validate inputs only.
+  --input_mode {visiumhd,atera}
+                        Input platform type
+  --exp_h5 EXP_H5       Spatial gene expression matrix h5
   --spatial_file SPATIAL_FILE
-                        Barcodes spatial coordinates.(./spatial/tissue_positions.parquet)
+                        [VisiumHD] Barcodes spatial coordinates.(./spatial/tissue_positions.parquet)
+  --cluster_file CLUSTER_FILE
+                        [VisiumHD] Barcodes cluster info.(csv);Graph-based.csv downloaded from Loupe Browser.
+  --cells_parquet CELLS_PARQUET
+                        [Atera] cells.parquet
+  --analysis_zarr_zip ANALYSIS_ZARR_ZIP
+                        [Atera] analysis.zarr.zip
   --manual_cutoff MANUAL_CUTOFF
-                        Cutoff to filter-out barcodes with low gene counts (INT, default: None). You either set this parameter or
-                        `--bw_method` to filter-out low-quality barcodes.
+                        Cutoff to filter-out barcodes with low gene counts (INT, default: None). You either set this
+                        parameter manually or provide `--bw_method` to automatically predict a value.
   --num_processes NUM_PROCESSES
                         The number of processes used for parallel (default: None)
   --cutoff CUTOFF       The min number of genes in a new spot as grouping cutoff. (default: 1000)
-  --window WINDOW       The nearest-neighbor spots for selecting grouping candidates. (default): 100
+  --window WINDOW       The nearest-neighbor spots for selecting grouping candidates. (default: 100)
   --cores CORES         Number of cores to run weighted-median parallelly
   --bw_method BW_METHOD
-                        Bandwidth scaling factor for KDE valley detection (e.g., 0.1 to 0.9). For it to work, `--manual_cutoff`
-                        needs to be default value None.
+                        Bandwidth scaling factor for KDE valley detection (e.g., 0.1 to 0.9). For it to work,
+                        `--manual_cutoff` needs to be default value None.
+  --smooth_method {arm,local}
+                        Weighted-median smoothing method: 'arm' or 'local' (default: arm)
+  --target_weight TARGET_WEIGHT
+                        Target weight for local smoothing (only used when --smooth_method=local, default: 25)
   --annotate_file ANNOTATE_FILE
                         Two-column clusters annotated csv file.
   --bulkCNV_file BULKCNV_FILE
                         [Optional] Two-column csv storing bulk-CNV info.
-  --pmtimes PMTIMES     The number of permutation times.
-  --ncluster NCLUSTER   Number of clusters for CNV plot.
+  --pmtimes PMTIMES     [Optional] The number of permutation times.
+  --ncluster NCLUSTER   Number of clusters for CNV plot, (default: 6).
   --distance_metric DISTANCE_METRIC
                         Distance metric for clustering
   --linkage_method LINKAGE_METHOD

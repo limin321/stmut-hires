@@ -2,6 +2,26 @@
 
 All notable changes to stmut-hires will be documented in this file.
 
+## [2026-06]
+### Added
+- **Refactor weighted median implementation**: add `local`-level based on provided minimum weight to infer CNV. Now user can infer CNV either `arm`-level or `local`-level.
+
+### Fixed
+- fix subcommand `run call-cnv` to be compatible with both `arm` and `local` level.
+- fix other scripts accordingly for this `arm`-level function and Atera platform.
+
+## [2026-05]
+### Added
+- **Sub-command `clean`**: add an independent `output_cleaner` class to clean output.
+- **data_io**: new modoule to reorganize I/O
+
+### Fixed
+- fix if only pArms has genes, qArm has 0 gene
+- evaluate inputs
+
+
+
+
 ## [2026-01-04]
 ### Added
 - **Sub-command `clean`**: Clean the output folder.

@@ -6,24 +6,40 @@ import traceback
 # Assuming these imports are correct
 from stmut_hires.data_io.cnr_reader import CnrReader
 from stmut_hires.data_io.centromere_reader import CentromereReader
-from .weighted_median import ArmWeightedMedian
+from .arm import ArmWeightedMedian
+from .adaptive import AdaptiveWeightedMedian
 from .cnr_writer import WtMedianWriter
+
+# Map config string -> class. Easy to extend with new strategies later.
+_STRATEGIES = {
+    "arm": ArmWeightedMedian,
+    "local": AdaptiveWeightedMedian,
+}
+
 
 class WorkflowOrchestrator:
     """Manage Overall Workflow,file discovery, parallel execution using existing class components"""
+    
     def __init__(self, config):
         self.config = config
+        self.logger = logging.getLogger(__name__)
         self.output_dir = config.output_dir
         self.cores = config.cores
         self.cnr_input_dir = os.path.join(self.output_dir, "cnr")
         self.cnr_files = self._find_cnr_files()
-        self.logger = logging.getLogger(__name__)
-
-        # # Determine project root
-        # module_dir = os.path.dirname(os.path.abspath(__file__))  # adjust if using Jupyter
-        # project_root = os.path.abspath(os.path.join(module_dir, "../../.."))
-        # self.bed_file = config.bed_file or os.path.join(project_root, "data/reference/hg38_centromereSimple.bed")
         self.bed_file = config.bed_file
+
+        # Which weighted-median strategy to run. Default keeps old behavior.
+        self.strategy = getattr(config, "smooth_method", "arm")
+        if self.strategy not in _STRATEGIES:
+            raise ValueError(
+                f"Unknown strategy {self.strategy!r}; "
+                f"expected one of ['arm', 'local']"
+            )
+        # Optional kwargs forwarded to the strategy constructor (e.g. target_weight)
+        #self.strategy_kwargs = getattr(config, "strategy_kwargs", {})
+        self.strategy_kwargs = {"target_weight": getattr(config, "target_weight", 25)}
+        
 
         # check if bed_file exist
         if not os.path.exists(self.bed_file):
@@ -43,7 +59,13 @@ class WorkflowOrchestrator:
         return full_paths
 
     @staticmethod
-    def _single_cnr_weighted_median(cnr_file,bed_file,output_dir):
+    def _single_cnr_weighted_median(
+        cnr_file,
+        bed_file,
+        output_dir, 
+        strategy, 
+        strategy_kwargs
+    ):
         """Calculate single cnr weighted median
         This function must be static/standalone for multiprocessing to work well.
         """
@@ -57,8 +79,9 @@ class WorkflowOrchestrator:
             ctmereloader = CentromereReader(bed_file)
             centm_sorted = ctmereloader.read_centromere() 
             # 3. Calculate Arm median
-            armsmedian = ArmWeightedMedian(cnr,centm_sorted)
-            df_arms, df_wmedian = armsmedian.chr_arm_weighted_median()
+            strategy_cls = _STRATEGIES[strategy]
+            armsmedian = strategy_cls(cnr, centm_sorted, **strategy_kwargs)
+            df_arms, df_wmedian = armsmedian.run_smoother()
             # 4. Write output
             savedata = WtMedianWriter(output_dir,df_arms,df_wmedian,cnr_name)
             savedata.save_wt_cnr()
@@ -78,7 +101,7 @@ class WorkflowOrchestrator:
         self.logger.info(f"Found {len(self.cnr_files)} cnr files. Starting parallel processing on {self.cores} cores")
 
         # Prepare argument tuples for starmap
-        tasks = [(cnr_file, self.bed_file, self.output_dir) for cnr_file in self.cnr_files]
+        tasks = [(cnr_file, self.bed_file, self.output_dir, self.strategy, self.strategy_kwargs) for cnr_file in self.cnr_files]
         with mp.Pool(processes=self.cores) as pool:
             results = pool.starmap(WorkflowOrchestrator._single_cnr_weighted_median, tasks)
 

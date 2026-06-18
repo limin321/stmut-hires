@@ -2,7 +2,7 @@
 
 ## Overview
 
-`stmut-hires` is a command-line tool for Copy Number Variation (CNV) analysis on high-resolution spatial transcriptomics data (Visium HD, StereoSeq). It ingests a Cell Ranger gene-expression matrix together with Loupe-Browser cluster assignments and Visium spatial coordinates, then runs a six-stage pipeline that splits expression by cluster, spatially merges neighboring barcodes to meet a per-spot gene-count cutoff, calls bin-level copy-number ratios with CNVkit, smooths them with a weighted median per chromosome arm, and finally classifies barcodes as CNV-positive or negative through permutation against an optional bulk CNV reference.
+`stmut-hires` is a command-line tool for Copy Number Variation (CNV) analysis on high-resolution spatial transcriptomics data (Visium HD, StereoSeq, Atera). It ingests a Space Ranger gene-expression matrix together with cluster assignments and spatial coordinates, then runs a six-stage pipeline that splits expression by cluster, spatially merges neighboring barcodes to meet a new per-spot gene-count cutoff, calls bin-level copy-number ratios with CNVkit, smooths them with a weighted median per chromosome arm (or via local adaptive windowing), and finally classifies barcodes as CNV-positive or negative through permutation against an optional bulk CNV reference.
 
 The package layout (`src/stmut_hires/`) is organized so that each subpackage owns one well-defined pipeline stage or one well-defined responsibility (I/O, plotting, configuration). All subpackage `__init__.py` files are empty; every importer uses the full module path. The dependency graph is strictly tiered — `main.py` orchestrates the workflow modules, the workflow modules call leaf processors, and no two modules import from each other.
 
@@ -13,11 +13,13 @@ src/stmut_hires/
 ├── main.py                    # Pipeline orchestrator and console-script entry point
 ├── cli_parser.py              # argparse definitions for the run / call-cnv / clean subcommands
 ├── config.py                  # BaseConfig → InitialStepConfig → MergerConfig → CNVAnalysisConfig
+├── adapters/                  # Platform adapters — convert non-VisiumHD inputs to canonical format
+├── metadata/                  # Pipeline provenance tracker — writes/reads metadata.json
 ├── data_io/                   # File readers, input validator, output cleaner
 ├── split_cluster_expr/        # Step 1 — KDE-filter and split expression by cluster
 ├── cluster_processor/         # Step 2 worker — spatial KD-tree merging per cluster
 ├── parallel_cluster_runner/   # Step 2 driver — parallelizes cluster_processor across clusters
-├── weighted_median/           # Step 4 — per-arm weighted median over cnr files
+├── weighted_median/           # Step 4 — per-arm (or local adaptive) weighted median over cnr files
 ├── call_cnv/                  # Step 6 — CNV calling, permutation, FDR, quintile assignment
 ├── visualization/             # All matplotlib/seaborn plots + chromosome-meta helpers
 └── data/                      # Bundled hg38 reference files (TSV/BED)
@@ -28,7 +30,19 @@ src/stmut_hires/
 The `run` subcommand executes six steps end-to-end. The `call-cnv` subcommand executes only Step 6 (used to re-run CNV calling after editing `bulkCNV.csv`).
 
 ```
-Inputs (.h5, Graph-Based.csv, tissue_positions.parquet, annotate.csv, bulkCNV.csv)
+Inputs (--input_mode selects platform)
+    │
+    ▼
+Pre-step  adapters.AteraAdapter  [Atera mode only]
+          Reads cells.parquet + analysis.zarr.zip and writes
+          atera/Graph-based.csv and atera/tissue_positions.parquet
+          so the rest of the pipeline always sees VisiumHD-format files.
+          → atera/Graph-based.csv, atera/tissue_positions.parquet
+    │
+    ▼
+metadata.json  (written by PipelineMetadataManager after validation)
+          Records platform, canonical_inputs, raw_inputs, runtime_params,
+          and completed_steps for reproducibility and call-cnv recovery.
     │
     ▼
 Step 1  split_cluster_expr.ClusterExpressionProcessor
@@ -49,7 +63,7 @@ Step 2  parallel_cluster_runner.ParallelClusterProcessor
     │
     ▼
 Step 3  cnvkit import-rna  (external subprocess)
-        Run from txt/ with ulimit -s ulimited; uses bundled
+        Run from txt/ with ulimit -s unlimited; uses bundled
         ensembl-gene-info.hg38.tsv (-g) and
         tcga-skcm.cnv-expr-corr.tsv (-c). main.py invokes cnvlib
         through an inline python -c that monkey-patches
@@ -59,8 +73,13 @@ Step 3  cnvkit import-rna  (external subprocess)
     ▼
 Step 4  weighted_median.WorkflowOrchestrator
         For each cnr file, joins to the hg38 centromere BED and
-        computes a weight-aware median (wquantiles) per chromosome
-        arm. Runs in a multiprocessing.Pool sized by --cores.
+        computes a weighted median per chromosome arm using one of
+        two strategies selected by --smooth_method:
+          "arm"   — whole-arm weighted median (ArmWeightedMedian)
+          "local" — adaptive local window expanding outward from each
+                    gene until cumulative weight ≥ --target_weight
+                    (AdaptiveWeightedMedian)
+        Runs in a multiprocessing.Pool sized by --cores.
         → wtcnr/<name>.cnr, wtcnr/summary.csv
     │
     ▼
@@ -80,6 +99,24 @@ Step 6  call_cnv.CNVCallPlotWorkflow
 ```
 
 ## Subpackages
+
+### `adapters/`
+
+Platform adapters normalize non-VisiumHD input formats into the canonical file set (`Graph-based.csv`, `tissue_positions.parquet`) expected by the rest of the pipeline.
+
+| Module | Class | Purpose |
+|--------|-------|---------|
+| `atera_adapter.py` | `AteraAdapter` | Converts `cells.parquet` + `analysis.zarr.zip` → VisiumHD-compatible CSVs. `get_graph_based()` decodes the sparse CSR cluster-assignment array from the zarr store; `get_tissue_position_parquet()` renames centroid columns to match the VisiumHD schema. Outputs land in `<output_dir>/atera/`. |
+
+### `metadata/`
+
+`PipelineMetadataManager` writes and maintains `<output_dir>/metadata.json`. Its responsibilities:
+
+- **`initialize_metadata()`** — called once after input validation in `run`, before any pipeline work. Records platform, canonical inputs, raw inputs, and runtime parameters.
+- **`update_completed_steps(step_name)`** — appended by `main.py` after each step completes.
+- **`load_metadata()`** — used by `call-cnv` to recover canonical inputs and runtime parameters without re-specifying them on the command line.
+
+The metadata file is the source of truth for `call-cnv` re-runs.
 
 ### `data_io/`
 
@@ -122,9 +159,13 @@ Outputs are written into `txt/`; the grouping-info CSV is moved to `cluster_summ
 
 ### `weighted_median/` (Step 4)
 
-- `ArmWeightedMedian.chr_arm_weighted_median()` walks p/q arms using the centromere BED and `wquantiles.median` to compute a weight-aware (log2-ratio × probes) median per arm.
+Two smoothing strategies share orchestration logic through a base class:
+
+- `BaseWeightedMedian` (ABC) — `run_smoother()` handles chromosome filtering (standard chr 1–22 + X→23), centromere-based p/q arm splitting via `_find_arms()`, and calls the subclass `_calculate()` for each chromosome.
+- `ArmWeightedMedian` — original strategy (`--smooth_method arm`): computes a single `wquantiles.median` for the entire p-arm and q-arm independently.
+- `AdaptiveWeightedMedian` — local strategy (`--smooth_method local`): for each gene, expands a window outward (preferring the genomically closer neighbor) until cumulative `weight` reaches `--target_weight`, then assigns the weighted median of that window. Falls back to arm-level median if the total arm weight is below the target.
 - `WtMedianWriter` writes the per-cnr smoothed file plus the cross-sample `wtcnr/summary.csv`.
-- `WorkflowOrchestrator.run_parallel_workflow()` dispatches one worker per cnr file over a `multiprocessing.Pool(config.cores)`.
+- `WorkflowOrchestrator.run_parallel_workflow()` dispatches one worker per cnr file over a `multiprocessing.Pool(config.cores)` using a strategy map (`"arm"` → `ArmWeightedMedian`, `"local"` → `AdaptiveWeightedMedian`).
 
 ### `call_cnv/` (Step 6)
 
@@ -176,24 +217,47 @@ MergerConfig(InitialStepConfig)
   └── spatial_file
 
 CNVAnalysisConfig(MergerConfig)
+  ├── canonical_inputs dict → clusterf, spatial_file, exp_h5
+  ├── metadata_manager                       ← PipelineMetadataManager instance
   ├── annotate_csv, bulk_csv
   ├── pmtimes (5), ncluster (6)
-  └── distance_metric ('euclidean'), linkage_method ('ward')
+  ├── distance_metric ('euclidean'), linkage_method ('ward')
+  ├── smooth_method ('arm')                  ← 'arm' or 'local'
+  └── target_weight (25)                     ← used only when smooth_method='local'
 ```
 
-`main.py` always constructs a `CNVAnalysisConfig`; CLI arguments not supplied by the active subcommand land as `None` and are simply unused by the modules that don't need them.
+`main.py` always constructs a `CNVAnalysisConfig`; canonical inputs are passed in via the `canonical_inputs` dict (populated directly for VisiumHD or after adapter conversion for Atera). CLI arguments not supplied by the active subcommand land as `None` and are simply unused by the modules that don't need them.
 
 ## CLI
 
-`cli_parser.CommandLineParser.parse_args()` defines three subcommands sharing argparse parent parsers (`global`, `step1-5`, `step6`):
+`cli_parser.CommandLineParser.parse_args()` defines three subcommands sharing argparse parent parsers:
 
-- `run` — full pipeline. Requires `--output_dir`, `--cluster_file`, `--exp_h5`, `--spatial_file`. Optional flags cover all step-1-5 and step-6 parameters listed in the README's help section.
-- `call-cnv` — Step 6 only. Requires `--output_dir`, `--cluster_file`; `--annotate_file` is effectively required at runtime by `InputValidator.validate_call_cnv`.
+- `run` — full pipeline. Requires `--output_dir`, `--input_mode` (`visiumhd` or `atera`), and `--exp_h5`. For VisiumHD mode, additionally requires `--cluster_file` and `--spatial_file`. For Atera mode, requires `--analysis_zarr_zip` and `--cells_parquet` instead. Optional flags cover pipeline and CNV-step parameters.
+- `call-cnv` — Step 6 only. Requires `--output_dir`; canonical inputs and runtime parameters are restored from the existing `metadata.json` in the output directory.
 - `clean` — deletes everything under `--output_dir` except `figures/` and `tables/`.
+
+Key optional flags:
+
+| Flag | Default | Effect |
+|------|---------|--------|
+| `--manual_cutoff` | `None` | Override KDE valley detection with a fixed gene-count cutoff |
+| `--bw_method` | `0.1` | KDE bandwidth scaling factor (used when `--manual_cutoff` is unset) |
+| `--cutoff` | `1000` | Minimum genes required per merged spot (Step 2) |
+| `--window` | `100` | Nearest-neighbor candidate pool for KD-tree merging |
+| `--num_processes` | `cpu_count()-1` | Pool size for Step 2 |
+| `--cores` | `4` | Pool size for Step 4 |
+| `--smooth_method` | `arm` | Weighted-median strategy (`arm` or `local`) |
+| `--target_weight` | `25` | Target cumulative weight for local adaptive smoothing |
+| `--annotate_file` | — | Required at runtime; two-column cluster → tumor/normal CSV |
+| `--bulkCNV_file` | `None` | Optional bulk CNV reference; enables permutation scoring |
+| `--pmtimes` | `5` | Permutation iterations |
+| `--ncluster` | `6` | Clusters shown in CNV heatmap |
+| `--distance_metric` | `euclidean` | Distance metric for unrooted heatmap |
+| `--linkage_method` | `ward` | Linkage method for hierarchical clustering |
 
 ## External tools
 
-The pipeline shells out to CNVkit twice; both calls are issued from `main.py` with `ulimit -s 65536`:
+The pipeline shells out to CNVkit twice; both calls are issued from `main.py` with `ulimit -s unlimited`:
 
 - **Step 3** — `cnvlib.cnvkit.main()` invoked via an inline `python -c` that monkey-patches `DataFrame.iteritems` / `Series.iteritems` to `.items` for pandas 2.x compatibility, then runs `import-rna -f counts -g <gene_info> -c <corr_file> --output-dir cnr -o cnr/output.txt $(ls *.txt)` from inside `txt/`.
 - **Step 5** — `cnvkit.py export cdt *.cnr -o cdt/grpWt.cdt` from inside `wtcnr/`.
@@ -204,7 +268,9 @@ The filesystem under `<output_dir>/` is the contract between stages — each dir
 
 | Path | Written by | Read by |
 |------|-----------|---------|
-| `cluster_exp/Cluster*.parquet`, `cluster_exp/ensembl.csv` | `split_cluster_expr.GeneDataWriter` (Step 1) | `parallel_cluster_runner.ParallelClusterProcessor` and `ClusterMerger` (Step 2); `main.verify_parquet_files` on subsequent runs |
+| `metadata.json` | `metadata.PipelineMetadataManager` (pre-step) | `main.py` (`call-cnv` input recovery) |
+| `atera/Graph-based.csv`, `atera/tissue_positions.parquet` | `adapters.AteraAdapter` (pre-step, Atera mode only) | pipeline as canonical inputs |
+| `cluster_exp/Cluster*.parquet`, `cluster_exp/ensembl.csv` | `split_cluster_expr.GeneDataWriter` (Step 1) | `parallel_cluster_runner.ParallelClusterProcessor` and `ClusterMerger` (Step 2); `main.verify_parquet_files` on re-runs |
 | `txt/<barcode>.txt` | `cluster_processor.{SingleBarcodeProcessor, BarcodesSortedProcessor, SmallClusterProcessor}` (Step 2) | `cnvkit import-rna` subprocess (Step 3) |
 | `cluster_summary/<cluster>_barcode_grouping_info.csv` | `cluster_processor.BarcodeMerger` → moved by `OutputDirManager.move_csvs_to_summary` | `call_cnv.ClusterSummary` (Step 6) |
 | `cnr/*.cnr` | `cnvkit import-rna` (Step 3) | `weighted_median.WorkflowOrchestrator` → `data_io.CnrReader` (Step 4) |
@@ -226,12 +292,14 @@ Both pools are short-lived and process-isolated; there is no shared mutable stat
 
 ## Dependencies
 
-Runtime dependencies pulled in by `pyproject.toml` and used across the tree: `pandas`, `numpy`, `scipy` (sparse, stats, signal, cluster.hierarchy, spatial.distance), `pyarrow`, `h5py`, `scikit-learn` (`sklearn.neighbors.KDTree`), `wquantiles`, `matplotlib`, `seaborn`, `tqdm`, `cnvkit` / `cnvlib`. Python ≥ 3.9.
+Runtime dependencies pulled in by `pyproject.toml` and used across the tree: `pandas`, `numpy`, `scipy` (sparse, stats, signal, cluster.hierarchy, spatial.distance), `pyarrow`, `h5py`, `scikit-learn` (`sklearn.neighbors.KDTree`), `wquantiles`, `matplotlib`, `seaborn`, `tqdm`, `zarr`, `cnvkit` / `cnvlib`. Python ≥ 3.9.
 
 ## Conventions and design notes
 
 - **Empty `__init__.py`** in every subpackage. There is no re-export layer; importers always use the full module path (`from stmut_hires.weighted_median.parallel_wtmedian import WorkflowOrchestrator`).
 - **Static-method classes** are used as namespaces in `visualization/`, `data_io/cdt_loader.py`, `data_io/annotate_reader.py`, and `call_cnv/{save_cnv,cnvscore_permutation,cnvscore_fdr}.py`. The classes never hold state; they exist purely to group related helpers.
 - **Configuration is passed, not imported.** Every workflow class takes the same `CNVAnalysisConfig` instance via the constructor. No module reads CLI args or environment variables directly.
+- **Canonical inputs are platform-agnostic.** `CNVAnalysisConfig` receives a `canonical_inputs` dict (`cluster_file`, `spatial_file`, `exp_h5`) regardless of platform; the adapter layer normalizes Atera files into that shape before config construction.
 - **Reference data is package-bundled.** The three hg38 files in `data/` are resolved with `importlib.resources` so the tool works whether installed via `pip install` or run from a checkout.
 - **Re-entrant by design.** Each pipeline stage is guarded by an existence/schema check in `main.py`, so re-running `stmut-hires run` after an interrupted job resumes at the first stage with missing outputs.
+- **Strategy pattern for smoothing.** `WorkflowOrchestrator` selects `ArmWeightedMedian` or `AdaptiveWeightedMedian` at startup via a `_STRATEGIES` dict keyed by `config.smooth_method`. Adding a third strategy requires only a new subclass of `BaseWeightedMedian` and a dict entry.

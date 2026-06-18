@@ -177,6 +177,8 @@ def build_config(args_dict, metadata_manager, canonical_inputs):
             'linkage_method', 
             'ward'
         ),
+        smooth_method=args_dict.get('smooth_method', 'arm'),
+        target_weight=args_dict.get('target_weight', 25),
     )
 
     return config
